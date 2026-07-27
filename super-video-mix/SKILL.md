@@ -166,6 +166,7 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
 ## 资源路由
 
 - 需要跨 macOS、Linux、Windows 安装依赖，或安装到 Codex、Claude Code、其他 Agent 时，读取 [references/installation-and-agents.md](references/installation-and-agents.md)。
+- 需要升级本机已安装的多个 Agent 时，先更新仓库，再运行 `scripts/install_skill.py --sync-agents`；不要直接编辑某个 Agent 的复制目录。
 - 需要批量操作、命名、文案、清理与验收的经验门禁时，读取 [references/avoid-pitfalls.md](references/avoid-pitfalls.md)。
 - 需要完整阶段、状态、输出布局和 review gate 时，读取 [references/workflow.md](references/workflow.md)。
 - 需要 3:4 预判、构图、镜像反转、调色、滤镜、降噪、锐化、变速的模式、顺序或风险时，读取 [references/transform-options.md](references/transform-options.md)。

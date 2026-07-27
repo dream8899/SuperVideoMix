@@ -162,6 +162,18 @@ python3 scripts/install_skill.py --agent codex --link --force
 python3 scripts/install_skill.py --agent claude-code --link --force
 ```
 
+安装器会把目标目录登记到 `~/.supervideomix/agent-installs.txt`。完成仓库升级后，可用下面的命令同步本机已登记的 Codex、Claude 和其他 Agent：
+
+```bash
+python3 scripts/install_skill.py --sync-agents
+```
+
+同步策略是：Codex/Claude 优先使用符号链接；其他 Agent 若原来是复制安装，则安全地用当前仓库版本重新复制。同步只处理 Skill 安装目录，不触碰视频素材。需要让新 Agent 参与同步时，先执行一次：
+
+```bash
+python3 scripts/install_skill.py --target-dir /absolute/path/to/skills
+```
+
 `--link` 只替换对应的 Skill 目录，不会修改源视频。Windows 建议先启用开发者模式或以允许创建符号链接的终端运行；若受权限限制，改用默认复制安装方式，并在每次 `git pull` 后重新执行安装器。链接或更新后重启 Agent，使其重新发现 `super-video-mix`；不要同时保留旧名 `video-remix-007`，以免 Agent 读取过期规则。
 
 ### Claude CLI 实战约定
@@ -169,6 +181,7 @@ python3 scripts/install_skill.py --agent claude-code --link --force
 - Claude CLI 的 Skills 根目录为 `~/.claude/skills`；使用 `$super-video-mix`，不要再调用 `$video-remix-007`。
 - Claude 目录若为符号链接，任何仓库更新会即时生效；先用 `readlink ~/.claude/skills/super-video-mix` 核对目标，再重启 Claude CLI。
 - Claude 与 Codex 都必须阅读同一份 `SKILL.md` 和 `references/avoid-pitfalls.md`，不得在某一 Agent 内维护未回写仓库的私有规则。
+- 不要在某个 Agent 的安装目录直接修改规则；修改仓库源后运行 `--sync-agents`，这样所有已登记的复制安装也会更新。
 - 平台路径、包管理器和 Python 命令有差异时，先按本文档验证依赖，再调用脚本；不要复制另一个系统的 shell 语法。
 
 ## 可移植调用模板
