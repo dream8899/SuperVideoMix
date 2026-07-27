@@ -115,7 +115,7 @@ SuperVideoMix 应将“保守清理”和“可控翻新”整合为同一条短
 ### 5.2 P1：增强版本
 
 - 内容感知的 9:16 重新构图，优先保留人脸、主体和文字安全区。
-- 更完整的视频感知指纹和相似度聚类。
+- 感知指纹缓存、增量扫描和更丰富的音频指纹（当前版本先提供基础视频感知指纹与候选组）。
 - 片头、中插空镜、异常卡帧和镜头边界分析。
 - 可编辑字幕重建：检测、OCR、时间轴、样式和重绘。
 - 音频响度、削波、底噪和音画偏移检测。
@@ -367,6 +367,12 @@ video_pipeline.py analyze INPUT --source douyin --report analysis.json
 
 # 比较目录内素材，不删除
 video_pipeline.py dedupe INPUT_DIR --report duplicates.json
+
+# 发现转码/轻微编辑后的相似候选，仅用于本地分类与人工复核
+video_pipeline.py fingerprint INPUT_DIR --threshold 0.86 --report perceptual-dedupe.json
+
+# 移除非内容元数据，源文件不覆盖；之后重新 fingerprint
+video_pipeline.py metadata INPUT.mp4 --output OUTPUT__catalog-clean.mp4 --report metadata.json
 
 # 根据分析与用户意图生成稳定计划
 video_pipeline.py plan INPUT --analysis analysis.json --preset vertical-social --output plan.json
@@ -742,7 +748,7 @@ JOB_DIR/
 
 ### 阶段 4：增加去重与批处理
 
-- 实现精确哈希、感知指纹、相似组、job ledger 和续跑。
+- 实现精确哈希、基础感知指纹、相似候选组、元数据规范化；job ledger 和续跑继续后续开发。
 - 先以 dry-run 和报告模式验证真实批次。
 
 ### 阶段 5：切换 Skill

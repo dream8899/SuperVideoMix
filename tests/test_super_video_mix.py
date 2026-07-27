@@ -293,6 +293,30 @@ class VideoRemixCliTests(unittest.TestCase):
         self.assertEqual(normalized["audio_codec"], "aac")
         self.assertNotEqual(vp9_source, output)
 
+    def test_metadata_sanitize_and_perceptual_candidate_group(self):
+        sanitized = self.root / "sample-sanitized.mp4"
+        metadata_report = self.root / "metadata.json"
+        result = self.run_cli(
+            "metadata", self.source, "--output", sanitized, "--report", metadata_report, "--json"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata_payload = json.loads(result.stdout)
+        self.assertEqual(metadata_payload["status"], "metadata_sanitized")
+        self.assertTrue(metadata_payload["verified"])
+        self.assertTrue(sanitized.exists())
+
+        fingerprint_report = self.root / "fingerprint.json"
+        result = self.run_cli(
+            "fingerprint", self.source, sanitized, "--report", fingerprint_report, "--json"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fingerprint_payload = json.loads(result.stdout)
+        self.assertEqual(fingerprint_payload["files_scanned"], 2)
+        self.assertEqual(fingerprint_payload["candidate_group_count"], 1)
+        details = json.loads(fingerprint_report.read_text(encoding="utf-8"))
+        self.assertTrue(details["similar_candidates"])
+        self.assertIn(details["similar_candidates"][0]["classification"], {"likely", "possible"})
+
     def test_detect_accept_apply_and_verify_black_silent_tail(self):
         source = self.root / "tail-sample.mp4"
         process = subprocess.run(

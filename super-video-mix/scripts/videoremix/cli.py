@@ -10,7 +10,9 @@ from .analyzer import analyze_tail
 from .constants import EXIT_OK, EXIT_VERIFY, SUPPORTED_EXTENSIONS
 from .errors import InputError, VideoRemixError
 from .executor import execute_plan
+from .fingerprint import build_candidate_report
 from .io_utils import read_json, write_json
+from .metadata import sanitize_metadata
 from .media import probe_media, sha256_file, tool_version
 from .normalize import normalize_download
 from .plans import (
@@ -57,6 +59,20 @@ def build_parser() -> argparse.ArgumentParser:
     normalize.add_argument("--report", required=True, help="兼容化报告 JSON 输出路径")
     _add_json_flag(normalize)
     normalize.set_defaults(handler=command_normalize)
+
+    metadata = subparsers.add_parser("metadata", help="清理兼容 MP4 的下载器和隐私元数据，源文件不动")
+    metadata.add_argument("input")
+    metadata.add_argument("--output", required=True, help="新的 .mp4 输出路径")
+    metadata.add_argument("--report", required=True)
+    _add_json_flag(metadata)
+    metadata.set_defaults(handler=command_metadata)
+
+    fingerprint = subparsers.add_parser("fingerprint", help="计算视频感知指纹并生成相似候选组")
+    fingerprint.add_argument("inputs", nargs="+")
+    fingerprint.add_argument("--threshold", type=float, default=0.86, help="候选相似度阈值，默认 0.86")
+    fingerprint.add_argument("--report", required=True)
+    _add_json_flag(fingerprint)
+    fingerprint.set_defaults(handler=command_fingerprint)
 
     dedupe = subparsers.add_parser("dedupe", help="使用 SHA-256 查找完全相同素材，不删除文件")
     dedupe.add_argument("inputs", nargs="+")
@@ -216,6 +232,31 @@ def command_normalize(args: argparse.Namespace) -> int:
         "reasons": report["reasons"],
     }
     _emit(result, json_mode=args.json, summary=f"编码兼容化完成：{report['output_path']}")
+    return EXIT_OK
+
+
+def command_metadata(args: argparse.Namespace) -> int:
+    report = sanitize_metadata(args.input, args.output)
+    report_path = write_json(args.report, report)
+    result = {"status": report["status"], "report": str(report_path), "output": report["output_path"], "verified": True}
+    _emit(result, json_mode=args.json, summary=f"元数据规范化完成：{report['output_path']}")
+    return EXIT_OK
+
+
+def command_fingerprint(args: argparse.Namespace) -> int:
+    if not 0.0 < args.threshold <= 1.0:
+        raise InputError("threshold 必须在 0 到 1 之间", code="FINGERPRINT_THRESHOLD_INVALID")
+    files = _discover_files(args.inputs)
+    report = build_candidate_report(files, args.threshold)
+    report_path = write_json(args.report, report)
+    result = {
+        "status": "ok",
+        "report": str(report_path),
+        "files_scanned": report["files_scanned"],
+        "candidate_group_count": len(report["candidate_groups"]),
+        "similar_candidate_count": len(report["similar_candidates"]),
+    }
+    _emit(result, json_mode=args.json, summary=f"感知指纹完成：发现 {len(report['candidate_groups'])} 个候选组；报告 {report_path}")
     return EXIT_OK
 
 
