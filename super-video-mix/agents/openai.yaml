@@ -1,0 +1,4 @@
+interface:
+  display_name: "SuperVideoMix"
+  short_description: "精准拆分、清理翻新、命名文案核验与输出验证授权短视频素材"
+  default_prompt: "使用 $super-video-mix 先分析我已授权的视频；核验命名和中英文文案后，待我批准再执行并验证。"
