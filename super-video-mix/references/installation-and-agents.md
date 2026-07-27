@@ -117,12 +117,14 @@ ls -la ~/.claude/skills/super-video-mix
 - 源目录在外部磁盘/网络挂载时，确保挂载点在 Claude Code 启动前已就绪。
 - 修改源目录中的 SKILL.md 会即时生效，不需要重新安装。
 
-**实战踩坑**：Skill 从 `VideoRemix007/video-remix-007` 迁移到 `SuperVideoMix/super-video-mix` 后，旧符号链接断裂，Claude Code 仍显示旧 skill 名但无法执行。修复方式：
+**实战踩坑**：Skill 从旧目录迁移到 `SuperVideoMix/super-video-mix` 后，旧符号链接会断裂，Claude Code 仍显示旧 skill 名但无法执行。若新名称尚不存在，安全地重命名旧链接：
 
 ```bash
-rm -f ~/.claude/skills/video-remix-007                          # 删除旧链接
-ln -s /path/to/SuperVideoMix/super-video-mix ~/.claude/skills/super-video-mix  # 新链接
+mv ~/.claude/skills/video-remix-007 ~/.claude/skills/super-video-mix
+readlink ~/.claude/skills/super-video-mix
 ```
+
+若 `super-video-mix` 已存在，不要删除任一目录；先用 `readlink` 确认其目标，再用本技能的 `install_skill.py --agent claude-code --link --force` 受控更新。
 
 ## 安装到 Agent
 
