@@ -12,6 +12,7 @@ from .errors import InputError, VideoRemixError
 from .executor import execute_plan
 from .io_utils import read_json, write_json
 from .media import probe_media, sha256_file, tool_version
+from .normalize import normalize_download
 from .plans import (
     COLOR_CHOICES,
     COMPOSITION_MODES,
@@ -46,6 +47,16 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--report", required=True)
     _add_json_flag(analyze)
     analyze.set_defaults(handler=command_analyze)
+
+    normalize = subparsers.add_parser(
+        "normalize",
+        help="下载后将 VP9/VP09 或其他不兼容编码转换为 QuickTime 兼容的 H.264/AAC MP4",
+    )
+    normalize.add_argument("input")
+    normalize.add_argument("--output", required=True, help="新的 .mp4 输出路径，不得覆盖输入")
+    normalize.add_argument("--report", required=True, help="兼容化报告 JSON 输出路径")
+    _add_json_flag(normalize)
+    normalize.set_defaults(handler=command_normalize)
 
     dedupe = subparsers.add_parser("dedupe", help="使用 SHA-256 查找完全相同素材，不删除文件")
     dedupe.add_argument("inputs", nargs="+")
@@ -191,6 +202,20 @@ def command_analyze(args: argparse.Namespace) -> int:
     report_path = write_json(args.report, report)
     result = {"status": "ok", "report": str(report_path), "analysis": report}
     _emit(result, json_mode=args.json, summary=f"分析完成：{report_path}")
+    return EXIT_OK
+
+
+def command_normalize(args: argparse.Namespace) -> int:
+    report = normalize_download(args.input, args.output)
+    report_path = write_json(args.report, report)
+    result = {
+        "status": report["status"],
+        "report": str(report_path),
+        "output": report["output_path"],
+        "verified": report["verified"],
+        "reasons": report["reasons"],
+    }
+    _emit(result, json_mode=args.json, summary=f"编码兼容化完成：{report['output_path']}")
     return EXIT_OK
 
 

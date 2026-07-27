@@ -132,6 +132,7 @@ def probe_media(path: str | Path) -> dict[str, Any]:
         "start_time": video.get("start_time", format_data.get("start_time")),
         "rotation": rotation,
         "video_codec": video.get("codec_name"),
+        "video_codec_tag": video.get("codec_tag_string"),
         "pixel_format": video.get("pix_fmt"),
         "has_audio": audio is not None,
         "audio_codec": audio.get("codec_name") if audio else None,

@@ -23,10 +23,12 @@ description: 面向抖音、TikTok、Instagram Reels、YouTube Shorts 等授权�
 10. 生成内容命名和发布文案前必须观看每个视频的代表帧（至少开头/中段/结尾）；不得从原文件名、拆分标签或账号主题反推画面内容。文案表中的文件名必须与实际输出逐一核验。
 11. 必须先生成并审阅 `视觉核验映射.tsv`：每个输出段落都要有 `状态=exact` 或人工确认的 `reviewed_category`；仍为 `category_only`、空值或仅序号的条目一律进入 HOLD，不得生成“可发布”文案或最终命名。执行前后强制校验文件名、映射表、文案表三方一一对应；发现不一致立即停止，不得交付半成品。
 12. 最终发布文案使用可读 `.txt`：每个视频单独一份，子目录与批次根目录各有汇总；中文与 English 分区表达，保留原始英文文案。机器 JSON/TSV 仅作为审批或内部证据，不得替代人类交付物。
+13. 下载后的输入必须先做 QuickTime 兼容性预检：VP9/VP09、非 H.264、非 AAC 或非 MP4 容器先运行 `normalize`，生成新 H.264 + AAC MP4；转换通过 `ffprobe` 和完整解码验证后，才进入 `dedupe`、`analyze` 或翻新。
 
 ## 选择工作流
 
 - 只要分析报告：运行 `analyze`，不要运行 `apply`。
+- 要处理刚下载的 MP4：先运行 `normalize`；VP9/VP09 会转为 H.264 + AAC MP4，源文件不动。
 - 要找重复素材：运行 `dedupe`；默认只报告，不删除文件。
 - 要拆分多主题长视频：先运行 `split_multitheme_video.py` 生成分析 JSON 和中点联系表；观看预览、核对边界及逐段命名后，才带审批参数执行。
 - 要清理或翻新：先 `analyze`，再用用户意图生成 `plan`，展示关键操作、风险、预览要求与输出路径。
@@ -40,6 +42,8 @@ description: 面向抖音、TikTok、Instagram Reels、YouTube Shorts 等授权�
 
 ```bash
 python3 "$SKILL_DIR/scripts/video_pipeline.py" analyze INPUT --source generic --report analysis.json
+python3 "$SKILL_DIR/scripts/video_pipeline.py" normalize INPUT.mp4 \
+  --output INPUT__h264-aac.mp4 --report normalize.json
 python3 "$SKILL_DIR/scripts/video_pipeline.py" dedupe INPUT_DIR --report duplicates.json
 python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT --analysis analysis.json \
   --accept-suggested-tail --final-output OUTPUT.mp4 --output plan.json
@@ -48,6 +52,16 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" verify plan.json --report verific
 ```
 
 需要机器输出时加 `--json`。先运行对应子命令的 `--help` 查看类型化选项。
+
+下载后先做兼容化（即使已经是 H.264/AAC，也会生成经过验证的新 MP4；若无需重编码则使用安全 remux）：
+
+```bash
+python3 "$SKILL_DIR/scripts/video_pipeline.py" normalize DOWNLOADED.mp4 \
+  --output "DOWNLOADED__h264-aac.mp4" \
+  --report normalize.json
+```
+
+报告中的 `status` 为 `converted` 或 `already_compatible`；只有 `verified=true` 才能把新文件交给后续流程。VP9/VP09 会使用 `libx264 + yuv420p`，音频统一写为 AAC，容器统一为 MP4，并启用 `+faststart`。
 
 多主题拼接视频先分析、不立即切割：
 
@@ -167,6 +181,6 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
 
 ## 阶段边界
 
-当前版本已实现：媒体探测、精确哈希去重、多证据废片尾分析、10/15 秒节奏候选比较、多主题真实转场定位、黑尾排除、分段联系表、逐段命名与完整解码验证、3:4 批量预判与红线预览、筛选清单与排期、显式裁切审批、固定区域 `delogo`、3:4 锚点裁切、1.0–1.25 倍安全放大、Lanczos 高清缩放、HD/HD+ 编码、水印后端路由元数据、`fit/fill/stretch` 构图、水平/垂直镜像、预设调色与滤镜、降噪、锐化、音画同步变速、临时输出验证和无覆盖交付。
+当前版本已实现：下载后 VP9/VP09 → H.264 + AAC MP4 兼容化、媒体探测、精确哈希去重、多证据废片尾分析、10/15 秒节奏候选比较、多主题真实转场定位、黑尾排除、分段联系表、逐段命名与完整解码验证、3:4 批量预判与红线预览、筛选清单与排期、显式裁切审批、固定区域 `delogo`、3:4 锚点裁切、1.0–1.25 倍安全放大、Lanczos 高清缩放、HD/HD+ 编码、水印后端路由元数据、`fit/fill/stretch` 构图、水平/垂直镜像、预设调色与滤镜、降噪、锐化、音画同步变速、临时输出验证和无覆盖交付。
 
 不要声称已经实现：感知相似度聚类、`smart/manual` 内容感知构图、移动水印跟踪、通用视频 inpainting、Gemini remover 实际执行、内置 VSR 模型、OCR 字幕重建或批处理续跑。`auto` 只能形成建议，必须展开为确定参数后才能执行；custom filter graph 暂不开放执行。

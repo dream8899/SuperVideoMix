@@ -14,7 +14,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from videoremix.errors import PlanError  # noqa: E402
 from videoremix.analyzer import FrameMetric, Profile, find_tail_cut  # noqa: E402
-from videoremix.media import sha256_file  # noqa: E402
+from videoremix.media import probe_media, sha256_file  # noqa: E402
 from videoremix.plans import (  # noqa: E402
     build_plan,
     compute_plan_hash,
@@ -265,6 +265,33 @@ class VideoRemixCliTests(unittest.TestCase):
         result = self.run_cli("verify", plan, "--report", verification, "--json")
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(json.loads(result.stdout)["status"], "failed")
+
+    def test_normalize_vp9_download_to_h264_aac_mp4(self):
+        vp9_source = self.root / "download-vp9.mp4"
+        encode = subprocess.run(
+            [
+                shutil.which("ffmpeg"), "-v", "error", "-i", str(self.source),
+                "-c:v", "libvpx-vp9", "-crf", "35", "-b:v", "0",
+                "-c:a", "aac", "-b:a", "96k", "-y", str(vp9_source),
+            ],
+            capture_output=True, text=True, check=False,
+        )
+        if encode.returncode != 0:
+            self.skipTest(f"ffmpeg 不支持 libvpx-vp9：{encode.stderr}")
+        self.assertEqual(probe_media(vp9_source)["video_codec"], "vp9")
+        output = self.root / "download-h264-aac.mp4"
+        report = self.root / "normalize.json"
+        result = self.run_cli(
+            "normalize", vp9_source, "--output", output, "--report", report, "--json"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "converted")
+        self.assertTrue(payload["verified"])
+        normalized = probe_media(output)
+        self.assertEqual(normalized["video_codec"], "h264")
+        self.assertEqual(normalized["audio_codec"], "aac")
+        self.assertNotEqual(vp9_source, output)
 
     def test_detect_accept_apply_and_verify_black_silent_tail(self):
         source = self.root / "tail-sample.mp4"
