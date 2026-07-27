@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import itertools
-import math
 import subprocess
 from pathlib import Path
 from typing import Any
