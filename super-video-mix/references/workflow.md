@@ -21,7 +21,11 @@ discover → probe → dedupe → analyze → multi-theme split preflight → cr
 
 顶部对齐 3:4 裁切必须先运行 `crop_3x4_preflight.py`。预判只提供内容风险排序，不替代人工观看红线预览；只有用户批准的 `适合` 或指定 `人工复核` 项才能进入 plan。
 
-多主题长视频必须先运行 `split_multitheme_video.py` 的分析模式。分析比较 10/15 秒常见拼接节奏，在节奏点附近定位真实转场并检测片尾黑屏；联系表、边界、段数和内容命名经人工核对后，才能使用 `--execute --approve-review`。拆分输出必须逐段完整解码验证并生成 `拆分清单.tsv`。
+多主题长视频必须先分析。**首选内容感知法**（`content_split.py`），从 scene scores 做峰值检测不预设节拍；若段长均匀再考虑节拍法（`split_multitheme_video.py`）比较 10/15 秒拼接节奏。
+
+分析阶段关键参数：min_height=0.15、min_distance=1.5s（聚合同一转场的多个峰）、min_segment=2.0s、过滤距开头<3s 的切点。置信度 high≥0.4 / medium≥0.25 / low<0.25。
+
+必须查看预览帧、核对边界、段数和内容命名后，才能执行。拆分输出必须逐段完整解码验证并生成 `拆分清单.tsv`。
 
 ## 2. Job state
 

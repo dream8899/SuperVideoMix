@@ -67,7 +67,23 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" normalize DOWNLOADED.mp4 \
 
 报告中的 `status` 为 `converted` 或 `already_compatible`；只有 `verified=true` 才能把新文件交给后续流程。VP9/VP09 会使用 `libx264 + yuv420p`，音频统一写为 AAC，容器统一为 MP4，并启用 `+faststart`。
 
-多主题拼接视频先分析、不立即切割：
+多主题拼接视频先分析、不立即切割。两种方法按素材特征选择：
+
+**内容感知法（默认首选）** — `content_split.py`，直接从 ffmpeg scene scores 做峰值检测，不预设固定节拍。适合段长不规则的拼接视频（如不同长度的剪辑片段拼成）：
+
+```bash
+# 1) 分析 + 预览
+python3 "$SKILL_DIR/scripts/content_split.py" --input-dir INPUT_DIR \
+  --output-dir PREVIEW_DIR --analyze --preview
+
+# 2) 审核预览帧和 _content_summary.tsv 后执行
+python3 "$SKILL_DIR/scripts/content_split.py" --input-dir INPUT_DIR \
+  --analysis-dir PREVIEW_DIR --execute --output-dir OUTPUT_DIR
+```
+
+参数：min_height=0.15（峰值最低分）、min_distance=1.5s（相邻峰合并窗口）、min_segment=2.0s（最段长）、过滤距开头<3s 的切点（intro 转场非主题变化）。置信度：high≥0.4 / medium≥0.25 / low<0.25。含 low 置信切点的视频标记 needs_review。
+
+**节拍法（备选）** — `split_multitheme_video.py`，适合段长均匀（约 10s / 15s 等距）的拼接视频：
 
 ```bash
 python3 "$SKILL_DIR/scripts/split_multitheme_video.py" INPUT \
@@ -75,7 +91,7 @@ python3 "$SKILL_DIR/scripts/split_multitheme_video.py" INPUT \
   --preview split-preview.jpg
 ```
 
-工具会比较常见的 10 秒与 15 秒主题节奏，在理论切点附近寻找真实转场，并检测片尾黑屏。必须观看联系表，核对 `suggested_cuts`、`segment_count` 和片尾排除范围。准备一个 TSV 命名表，第一列为源文件名，第二列为用 `|` 分隔的逐段中文名称；确认后执行：
+必须观看联系表，核对切点、段数和片尾排除范围。确认后执行：
 
 ```bash
 python3 "$SKILL_DIR/scripts/split_multitheme_video.py" INPUT \
@@ -86,7 +102,9 @@ python3 "$SKILL_DIR/scripts/split_multitheme_video.py" INPUT \
   --output-dir OUTPUT_DIR
 ```
 
-执行使用精确时间线重编码，逐段完整解码验证，并输出 `拆分清单.tsv`。不得仅按整数秒盲切；弱转场、黑屏范围、段数或命名不确定时保持分析状态，先人工复核。源文件不动，输出目录不得已存在。
+**选择指南**：先用内容感知法分析两个样本——若段长差异>30%说明节拍法不适用。若段长均匀（±15%），任选其一。
+
+执行统一用精确时间线重编码（trim/atrim + setpts/asetpts），逐段完整解码验证，输出 `拆分清单.tsv`。不得仅按整数秒盲切；弱转场、黑屏范围、段数或命名不确定时保持分析状态，先人工复核。源文件不动，输出目录不得已存在。
 
 保真计划保持所有增强关闭。可控增强示例：
 

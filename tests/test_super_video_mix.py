@@ -22,6 +22,7 @@ from videoremix.plans import (  # noqa: E402
     validate_plan_for_apply,
     verify_plan_hash,
 )
+from content_split import find_peaks  # noqa: E402
 
 
 def base_options(**overrides):
@@ -100,6 +101,10 @@ class VideoRemixPlanTests(unittest.TestCase):
         self.assertEqual(by_type["speed"]["params"]["factor"], 1.06)
         self.assertTrue(plan["preview"]["required"])
         self.assertEqual(plan["conflict_checks"][0]["status"], "needs_review")
+
+    def test_content_split_clusters_nearby_peaks_without_duplicate_tail(self):
+        peaks = find_peaks([(1.0, 0.3), (1.4, 0.5), (5.0, 0.45)], min_distance=1.5)
+        self.assertEqual([(round(t, 1), round(score, 1)) for t, score, _ in peaks], [(1.4, 0.5), (5.0, 0.5)])
 
     def test_mirror_and_flip_modes_have_explicit_ffmpeg_filters(self):
         horizontal = self.make_plan(flip="horizontal")
