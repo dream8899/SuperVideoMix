@@ -25,6 +25,7 @@
 ```bash
 python3 "$SKILL_DIR/scripts/smart_label_detect.py" INPUT.mp4 \
   --creator CREATOR_NAME --memory MEMORY_DIR \
+  --target-label magicbox.studio \
   --report label-crop-analysis.json \
   --preview-dir previews
 ```
@@ -34,6 +35,7 @@ python3 "$SKILL_DIR/scripts/smart_label_detect.py" INPUT.mp4 \
 ```bash
 python3 "$SKILL_DIR/scripts/smart_label_detect.py" --input-dir INPUT_DIR \
   --creator CREATOR_NAME --memory MEMORY_DIR \
+  --target-label magicbox.studio \
   --output-dir ANALYSIS_DIR --preview-dir ANALYSIS_DIR/previews
 ```
 
@@ -42,6 +44,8 @@ python3 "$SKILL_DIR/scripts/smart_label_detect.py" --input-dir INPUT_DIR \
 - `label_crop_analysis.json`：完整检测证据与裁剪候选。
 - `label_crop_screening.tsv`：文件、裁剪矩形、内容损失、风险和复核状态。
 - `previews/*__label-crop-preview.jpg`：红色候选框与绿色保留框。
+
+提供 `--target-label` 时，仅保留顶部 OCR 与目标文字相似且跨帧稳定的文字候选；目标文字使用 4 个关键时点做原分辨率 OCR，其他顶部文字全部忽略。Logo 候选不受该过滤影响。
 
 ## 创作者记忆
 

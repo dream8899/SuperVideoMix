@@ -24,7 +24,7 @@ from videoremix.plans import (  # noqa: E402
 )
 from content_split import find_peaks  # noqa: E402
 from smart_label_detect import analyze as analyze_labels  # noqa: E402
-from smart_label_detect import calculate_crop, detect_spatial_candidates  # noqa: E402
+from smart_label_detect import calculate_crop, detect_spatial_candidates, match_target_label  # noqa: E402
 
 
 def base_options(**overrides):
@@ -135,13 +135,20 @@ class VideoRemixPlanTests(unittest.TestCase):
             "text_position": "none", "top_text_band": None, "bot_text_band": None,
             "logo_band": None, "overlay_candidates": [], "resolution": "64x96",
         }
-        with mock.patch("smart_label_detect.extract_frames",
+        with mock.patch("smart_label_detect.check_playability", return_value={"status": "verified"}), \
+             mock.patch("smart_label_detect.extract_frames",
                         return_value=([bytes(64 * 96), bytes(64 * 96)], 64, 96, 5.0, 64, 96)), \
              mock.patch("smart_label_detect.detect_overlays", return_value=detection.copy()):
             analyze_labels(self.source, "creator", memory_dir, confirm_memory=False)
             self.assertFalse((memory_dir / "creator.json").exists())
             analyze_labels(self.source, "creator", memory_dir, confirm_memory=True)
             self.assertTrue((memory_dir / "creator.json").exists())
+
+    def test_target_label_matching_is_stable_and_normalized(self):
+        with mock.patch("smart_label_detect._ocr_pgm", return_value="MagicBox Studio"):
+            result = match_target_label([bytes(64 * 32)] * 4, 64, 32, [0, 0, 64, 16], "magicbox.studio")
+        self.assertGreaterEqual(result["target_match_score"], 0.9)
+        self.assertEqual(result["target_match_rate"], 1.0)
 
     def test_mirror_and_flip_modes_have_explicit_ffmpeg_filters(self):
         horizontal = self.make_plan(flip="horizontal")

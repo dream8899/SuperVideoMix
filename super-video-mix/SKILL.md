@@ -137,11 +137,13 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
 # 单视频分析
 python3 "$SKILL_DIR/scripts/smart_label_detect.py" VIDEO.mp4 \
   --creator CREATOR_NAME --memory MEMORY_DIR \
+  --target-label magicbox.studio \
   --report label-crop-analysis.json --preview-dir previews
 
 # 批量分析；人工确认后才另行写入创作者记忆
 python3 "$SKILL_DIR/scripts/smart_label_detect.py" --input-dir DIR \
   --creator CREATOR_NAME --memory MEMORY_DIR \
+  --target-label magicbox.studio \
   --output-dir ANALYSIS_DIR --preview-dir ANALYSIS_DIR/previews
 ```
 

@@ -19,13 +19,28 @@ Usage:
   python3 smart_label_detect.py VIDEO.mp4 --creator NAME --memory MEMORY_DIR
 """
 
-import argparse, csv, json, statistics, subprocess, time
+import argparse, csv, difflib, json, re, shutil, statistics, subprocess, time
 from pathlib import Path
 
 MEMORY_VERSION = 2
 ANALYSIS_WIDTH = 256
 SAMPLE_COUNT = 8
+TARGET_OCR_SAMPLES = 4
 GRID_SIZE = 8
+
+
+def check_playability(path: Path) -> dict:
+    """Decode the complete file so partial/corrupt MP4s are not treated as usable."""
+    try:
+        process = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v:0", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=180,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "failed", "error": "full_decode_timeout"}
+    if process.returncode:
+        return {"status": "failed", "error": process.stderr.strip()[-1000:] or "full_decode_failed"}
+    return {"status": "verified"}
 
 
 # ── Core detection ──────────────────────────────────────────────
@@ -128,6 +143,79 @@ def _tile_metrics(frame: bytes, w: int, x1: int, y1: int, x2: int, y2: int) -> t
     return mean, variance ** 0.5
 
 
+def _ocr_pgm(pgm: bytes) -> str:
+    if not shutil.which("tesseract"):
+        return ""
+    process = subprocess.run(
+        ["tesseract", "stdin", "stdout", "--psm", "7", "-l", "eng"],
+        input=pgm, capture_output=True, timeout=15,
+    )
+    return process.stdout.decode(errors="ignore").strip() if process.returncode == 0 else ""
+
+
+def _ocr_image(image: bytes) -> str:
+    if not shutil.which("tesseract"):
+        return ""
+    process = subprocess.run(
+        ["tesseract", "stdin", "stdout", "--psm", "7", "-l", "eng"],
+        input=image, capture_output=True, timeout=20,
+    )
+    return process.stdout.decode(errors="ignore").strip() if process.returncode == 0 else ""
+
+
+def _target_text_score(text: str, target: str) -> float:
+    normalize = lambda value: re.sub(r"[^a-z0-9]", "", value.lower())
+    actual, expected = normalize(text), normalize(target)
+    if not actual or not expected:
+        return 0.0
+    return difflib.SequenceMatcher(None, actual, expected).ratio()
+
+
+def match_target_label(frames: list[bytes], w: int, h: int, box: list[int], target: str) -> dict:
+    """OCR a candidate label across samples; keep it only when the target is stable."""
+    x1, y1, x2, y2 = [max(0, int(value)) for value in box]
+    x2, y2 = min(w, x2), min(h, y2)
+    texts, scores = [], []
+    for frame in frames:
+        crop = bytearray()
+        for y in range(y1, y2):
+            crop.extend(frame[y * w + x1:x2])
+        # OCR needs more than the 256px analysis raster; nearest-neighbor enlargement
+        # gives Tesseract enough glyph pixels without introducing an image dependency.
+        scale = 4
+        enlarged = bytearray()
+        row_width = x2 - x1
+        for offset in range(0, len(crop), row_width):
+            row = crop[offset:offset + row_width]
+            enlarged.extend(value for pixel in row for value in (pixel,) * scale for _ in range(scale))
+        pgm = f"P5\n{row_width * scale} {(y2-y1) * scale}\n255\n".encode() + bytes(enlarged)
+        text = _ocr_pgm(pgm)
+        texts.append(text)
+        scores.append(_target_text_score(text, target))
+    return {"target_label": target, "ocr_texts": texts, "target_match_score": round(max(scores, default=0.0), 3),
+            "target_match_rate": round(sum(score >= 0.55 for score in scores) / max(1, len(scores)), 3)}
+
+
+def match_target_label_media(path: Path, duration: float, box: list[int], source_w: int,
+                             source_h: int, analysis_w: int, analysis_h: int, target: str) -> dict:
+    """OCR the original-resolution candidate; low-res analysis pixels are insufficient for glyph matching."""
+    sx, sy = source_w / analysis_w, source_h / analysis_h
+    x1, y1, x2, y2 = [round(value) for value in (box[0] * sx, box[1] * sy, box[2] * sx, box[3] * sy)]
+    texts, scores = [], []
+    for fraction in (0.05, 0.35, 0.65, 0.95):
+        timestamp = max(0.1, min(duration - 0.3, duration * fraction))
+        process = subprocess.run([
+            "ffmpeg", "-v", "error", "-ss", f"{timestamp:.3f}", "-i", str(path), "-an",
+            "-frames:v", "1", "-vf", f"crop={x2-x1}:{y2-y1}:{x1}:{y1},scale=960:-2:flags=neighbor,format=gray",
+            "-f", "image2pipe", "-vcodec", "png", "-"
+        ], capture_output=True, timeout=20)
+        text = _ocr_image(process.stdout) if process.returncode == 0 else ""
+        texts.append(text)
+        scores.append(_target_text_score(text, target))
+    return {"target_label": target, "ocr_texts": texts, "target_match_score": round(max(scores, default=0.0), 3),
+            "target_match_rate": round(sum(score >= 0.55 for score in scores) / max(1, len(scores)), 3)}
+
+
 def detect_spatial_candidates(frames: list[bytes], w: int, h: int) -> list[dict]:
     """Locate persistent high-detail overlay candidates on a coarse 2D grid."""
     cols = (w + GRID_SIZE - 1) // GRID_SIZE
@@ -213,7 +301,7 @@ def scale_candidates(candidates: list[dict], source_w: int, source_h: int,
     return scaled
 
 
-def detect_overlays(frames: list[bytes], w: int, h: int) -> dict:
+def detect_overlays(frames: list[bytes], w: int, h: int, target_label: str = "") -> dict:
     """
     Primary detection using temporal consensus.
     Returns detected overlay regions.
@@ -530,13 +618,46 @@ def calculate_crop(detection: dict, w: int, h: int) -> dict:
     }
 
 
+def apply_target_label_filter(detection: dict, path: Path, duration: float, target: str,
+                              source_w: int, source_h: int, analysis_w: int, analysis_h: int) -> dict:
+    """Keep only the requested top label; preserve Logo candidates independently."""
+    if not target:
+        return detection
+    filtered = []
+    target_boxes = []
+    for candidate in detection.get("overlay_candidates", []):
+        if candidate["kind"] == "text_label" and candidate["box"][1] < analysis_h * 0.35:
+            match = match_target_label_media(path, duration, candidate["box"], source_w, source_h,
+                                              analysis_w, analysis_h, target)
+            candidate = {**candidate, **match}
+            if candidate["target_match_score"] >= 0.55 and candidate["target_match_rate"] >= 0.25:
+                candidate["kind"] = "target_text_label"
+                filtered.append(candidate)
+                target_boxes.append(candidate["box"])
+        elif candidate["kind"] != "text_label":
+            filtered.append(candidate)
+    detection = {**detection, "overlay_candidates": filtered}
+    if target_boxes:
+        detection["top_text_band"] = [min(item[1] for item in target_boxes), max(item[3] for item in target_boxes)]
+        detection["text_position"] = "top"
+    else:
+        detection["top_text_band"] = None
+        detection["bot_text_band"] = None
+        detection["text_position"] = "none"
+    return detection
+
+
 # ── Main API ────────────────────────────────────────────────────
 
 def analyze(path: Path, creator: str = "", memory_dir: Path = None,
-            confirm_memory: bool = False) -> dict:
+            confirm_memory: bool = False, target_label: str = "") -> dict:
     """Full analysis: detect overlays, apply memory if available, return crop params."""
+    playback = check_playability(path)
+    if playback["status"] != "verified":
+        return {"input": str(path.resolve()), "status": "unplayable", "playback": playback}
     frames, analysis_w, analysis_h, dur, w, h = extract_frames(path)
     detection = detect_overlays(frames, analysis_w, analysis_h)
+    detection = apply_target_label_filter(detection, path, dur, target_label, w, h, analysis_w, analysis_h)
     scale_y = h / analysis_h
     for key in ("top_text_band", "bot_text_band", "logo_band"):
         if detection.get(key):
@@ -568,7 +689,8 @@ def analyze(path: Path, creator: str = "", memory_dir: Path = None,
     if creator and memory_dir and confirm_memory:
         save_memory(memory_dir, creator, crop, detection)
 
-    return {"input": str(path.resolve()), **detection, "crop": crop}
+    return {"input": str(path.resolve()), "target_label": target_label,
+            "playback": playback, **detection, "crop": crop}
 
 
 def make_preview(path: Path, result: dict, preview_dir: Path) -> Path:
@@ -597,8 +719,8 @@ def make_preview(path: Path, result: dict, preview_dir: Path) -> Path:
 def cmd_analyze_video(args):
     path = Path(args.input)
     result = analyze(path, args.creator or "",
-                     Path(args.memory) if args.memory else None, args.confirm_memory)
-    if args.preview_dir:
+                     Path(args.memory) if args.memory else None, args.confirm_memory, args.target_label)
+    if args.preview_dir and result.get("status") != "unplayable":
         result["preview"] = str(make_preview(path, result, Path(args.preview_dir)))
     if args.report:
         report = Path(args.report)
@@ -619,14 +741,17 @@ def cmd_analyze_dir(args):
     for f in mp4s:
         creator = args.creator or src.name  # default: use dir name as creator
         try:
-            r = analyze(f, creator, mem, args.confirm_memory)
-            if args.preview_dir:
+            r = analyze(f, creator, mem, args.confirm_memory, args.target_label)
+            if args.preview_dir and r.get("status") not in {"failed", "unplayable"}:
                 r["preview"] = str(make_preview(f, r, Path(args.preview_dir)))
         except Exception as exc:
             r = {"input": str(f.resolve()), "status": "failed", "error": str(exc)}
         results.append(r)
         if r.get("status") == "failed":
             print(f"  {f.name[:45]}... 失败: {r['error']}")
+            continue
+        if r.get("status") == "unplayable":
+            print(f"  {f.name[:45]}... 无法播放: {r['playback'].get('error', '')[:120]}")
             continue
         crop = r["crop"]
         print(f"  {f.name[:45]}... text:{crop['text_position']} "
@@ -643,14 +768,18 @@ def cmd_analyze_dir(args):
         )
         with (output_dir / "label_crop_screening.tsv").open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle, delimiter="\t")
-            writer.writerow(["file", "status", "crop_rect", "content_loss", "risk", "review_required", "preview"])
+            writer.writerow(["file", "playback", "status", "crop_rect", "content_loss", "risk", "review_required", "preview"])
             for item in results:
                 if item.get("status") == "failed":
-                    writer.writerow([Path(item["input"]).name, "failed", "", "", "", True, ""])
+                    writer.writerow([Path(item["input"]).name, "failed", "failed", "", "", "", True, ""])
+                    continue
+                if item.get("status") == "unplayable":
+                    writer.writerow([Path(item["input"]).name, "failed", "unplayable", "", "", "high", True, ""])
                     continue
                 crop = item["crop"]
-                writer.writerow([Path(item["input"]).name, "candidate", json.dumps(crop["crop_rect"]),
-                                 crop["content_loss"], crop["risk"], crop["review_required"], item.get("preview", "")])
+                writer.writerow([Path(item["input"]).name, item["playback"]["status"], "candidate",
+                                 json.dumps(crop["crop_rect"]), crop["content_loss"], crop["risk"],
+                                 crop["review_required"], item.get("preview", "")])
 
 
 def main():
@@ -663,6 +792,7 @@ def main():
     p.add_argument("--output-dir", help="批量 JSON/TSV 报告目录")
     p.add_argument("--preview-dir", help="输出带候选框和裁剪框的复核图")
     p.add_argument("--confirm-memory", action="store_true", help="确认已人工复核后才写入创作者记忆")
+    p.add_argument("--target-label", default="", help="只保留顶部匹配该文字的候选，例如 magicbox.studio")
     args = p.parse_args()
 
     if args.input_dir:
