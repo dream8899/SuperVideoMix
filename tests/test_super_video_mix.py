@@ -23,6 +23,8 @@ from videoremix.plans import (  # noqa: E402
     verify_plan_hash,
 )
 from content_split import find_peaks  # noqa: E402
+from smart_label_detect import analyze as analyze_labels  # noqa: E402
+from smart_label_detect import calculate_crop, detect_spatial_candidates  # noqa: E402
 
 
 def base_options(**overrides):
@@ -105,6 +107,41 @@ class VideoRemixPlanTests(unittest.TestCase):
     def test_content_split_clusters_nearby_peaks_without_duplicate_tail(self):
         peaks = find_peaks([(1.0, 0.3), (1.4, 0.5), (5.0, 0.45)], min_distance=1.5)
         self.assertEqual([(round(t, 1), round(score, 1)) for t, score, _ in peaks], [(1.4, 0.5), (5.0, 0.5)])
+
+    def test_spatial_overlay_detection_prefers_minimum_loss_edge_crop(self):
+        width, height = 64, 96
+        frames = []
+        for frame_index in range(8):
+            pixels = bytearray(width * height)
+            for y in range(height):
+                for x in range(width):
+                    pixels[y * width + x] = (x * 2 + y + frame_index * 11) % 180
+            for y in range(80, 96):
+                for x in range(48, 64):
+                    pixels[y * width + x] = 245 if (x + y) % 2 else 15
+            frames.append(bytes(pixels))
+        candidates = detect_spatial_candidates(frames, width, height)
+        corner = next(item for item in candidates if {"right", "bottom"}.issubset(item["touches_edges"]))
+        detection = {"text_position": "none", "top_text_band": None, "bot_text_band": None,
+                     "logo_band": None, "overlay_candidates": [corner]}
+        crop = calculate_crop(detection, width, height)
+        self.assertGreater(crop["bot_crop_px"], 0)
+        self.assertEqual(crop["right_crop_px"], 0)
+        self.assertTrue(crop["review_required"])
+
+    def test_creator_memory_requires_explicit_confirmation(self):
+        memory_dir = self.root / "memory"
+        detection = {
+            "text_position": "none", "top_text_band": None, "bot_text_band": None,
+            "logo_band": None, "overlay_candidates": [], "resolution": "64x96",
+        }
+        with mock.patch("smart_label_detect.extract_frames",
+                        return_value=([bytes(64 * 96), bytes(64 * 96)], 64, 96, 5.0, 64, 96)), \
+             mock.patch("smart_label_detect.detect_overlays", return_value=detection.copy()):
+            analyze_labels(self.source, "creator", memory_dir, confirm_memory=False)
+            self.assertFalse((memory_dir / "creator.json").exists())
+            analyze_labels(self.source, "creator", memory_dir, confirm_memory=True)
+            self.assertTrue((memory_dir / "creator.json").exists())
 
     def test_mirror_and_flip_modes_have_explicit_ffmpeg_filters(self):
         horizontal = self.make_plan(flip="horizontal")

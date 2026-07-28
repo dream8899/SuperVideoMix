@@ -23,7 +23,7 @@ discover → probe → dedupe → analyze → multi-theme split preflight → cr
 
 多主题长视频必须先分析。**首选内容感知法**（`content_split.py`），从 scene scores 做峰值检测不预设节拍；若段长均匀再考虑节拍法（`split_multitheme_video.py`）比较 10/15 秒拼接节奏。
 
-分析阶段关键参数：min_height=0.15、min_distance=1.5s（聚合同一转场的多个峰）、min_segment=2.0s、过滤距开头<3s 的切点。置信度 high≥0.4 / medium≥0.25 / low<0.25。
+内容拆分采用自适应三阶段：先以 `min_height=0.25`、`min_distance=2.5s` 找高置信切点；再对超过 15 秒的长段用 0.10 阈值和 dHash 备援；最后合并造成中位段过短的低质量切点。
 
 必须查看预览帧、核对边界、段数和内容命名后，才能执行。拆分输出必须逐段完整解码验证并生成 `拆分清单.tsv`。
 
@@ -70,6 +70,7 @@ JOB_DIR/
 7. `needs_review` conflict 已显式批准。
 8. 3:4 顶部裁切项已在筛选清单中获批，且预览红线未穿过关键主体。
 9. 多主题拆分项已观看联系表，切点没有落在动作中段，片尾黑屏已排除，逐段名称与内容一致。
+10. 文字/Logo 裁剪项已查看红框/绿框预览；候选身份、最小损失方向和 `review_required` 已人工确认，未确认结果不得写入创作者记忆。
 
 ## 5. 退出码
 
