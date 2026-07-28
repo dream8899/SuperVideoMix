@@ -25,6 +25,7 @@ from videoremix.plans import (  # noqa: E402
 from content_split import find_peaks  # noqa: E402
 from smart_label_detect import analyze as analyze_labels  # noqa: E402
 from smart_label_detect import calculate_crop, detect_spatial_candidates, match_target_label  # noqa: E402
+from free_crop_remix import crop_rect  # noqa: E402
 
 
 def base_options(**overrides):
@@ -149,6 +150,12 @@ class VideoRemixPlanTests(unittest.TestCase):
             result = match_target_label([bytes(64 * 32)] * 4, 64, 32, [0, 0, 64, 16], "magicbox.studio")
         self.assertGreaterEqual(result["target_match_score"], 0.9)
         self.assertEqual(result["target_match_rate"], 1.0)
+
+    def test_free_crop_ignores_unaccepted_diagnostic_rectangle(self):
+        item = {"crop": {"crop_rect": {"x": 0, "y": 200, "width": 1080, "height": 1600},
+                          "accepted_candidates": []}}
+        self.assertEqual(crop_rect(item, 1080, 1920),
+                         (0, 0, 1080, 1920, "no_reliable_target_crop"))
 
     def test_mirror_and_flip_modes_have_explicit_ffmpeg_filters(self):
         horizontal = self.make_plan(flip="horizontal")

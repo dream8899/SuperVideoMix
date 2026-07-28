@@ -149,6 +149,19 @@ python3 "$SKILL_DIR/scripts/smart_label_detect.py" --input-dir DIR \
 
 必须审查红色候选框和绿色保留框。`review_required=true`、组合内容损失超过 20%、候选不贴边或框到主体时一律 HOLD。只有人工确认后才可加入 `--confirm-memory` 写入创作者记忆。完整算法、输出和执行门禁见 [references/label-logo-detection.md](references/label-logo-detection.md)。
 
+确认分析后，可用 `free_crop_remix.py` 对通过候选执行自由裁剪和翻新。它只接受 `accepted_candidates` 的裁剪框；低置信度诊断框自动回退完整画面。全部输出先完成 H.264/解码验证，传入 `--replace-targets` 时才会把目标文件移入备份后替换：
+
+```bash
+python3 "$SKILL_DIR/scripts/free_crop_remix.py" \
+  --analysis ANALYSIS_DIR/label_crop_analysis.json \
+  --target-dir REFURB_DIR \
+  --output-dir REFURB_DIR/repair_YYYYMMDD/processed \
+  --backup-dir REFURB_DIR/repair_YYYYMMDD/backup \
+  --replace-targets
+```
+
+处理顺序固定为：自由裁剪（仅获批的 `magicbox.studio` 顶部标签/底部 Logo）→ 1.3 倍分辨率提升 → 1.1 倍中心放大 → light 降噪 → natural 调色 → light 锐化 → 0.9 倍音画同步变速。源目录文件不修改；替换前必须保留备份并检查执行报告。
+
 将 9:16 裁成 3:4 并从底部排除右下水印（固定比例，标签位置统一时用）：
 
 ```bash

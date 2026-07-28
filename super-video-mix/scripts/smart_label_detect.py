@@ -634,9 +634,12 @@ def apply_target_label_filter(detection: dict, path: Path, duration: float, targ
                 candidate["kind"] = "target_text_label"
                 filtered.append(candidate)
                 target_boxes.append(candidate["box"])
-        elif candidate["kind"] != "text_label":
+        elif candidate["kind"] == "logo" and ((candidate["box"][1] + candidate["box"][3]) / 2) > analysis_h * 0.65:
             filtered.append(candidate)
     detection = {**detection, "overlay_candidates": filtered}
+    bottom_logos = [item["box"] for item in filtered if item["kind"] == "logo"]
+    detection["logo_band"] = ([min(item[1] for item in bottom_logos), max(item[3] for item in bottom_logos)]
+                               if bottom_logos else None)
     if target_boxes:
         detection["top_text_band"] = [min(item[1] for item in target_boxes), max(item[3] for item in target_boxes)]
         detection["text_position"] = "top"
