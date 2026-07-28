@@ -67,6 +67,10 @@ def crop_rect(item: dict, width: int, height: int) -> tuple[int, int, int, int, 
 
 
 def target_for(source: Path, target_dir: Path) -> Path:
+    # Explicit files supplied from the refurb directory are their own targets;
+    # this also disambiguates variants such as 030 and 030_precise.
+    if source.parent == target_dir and source.is_file():
+        return source
     number = source.name.split("__", 1)[0]
     matches = sorted(path for path in target_dir.glob(f"{number}*.mp4") if path.is_file())
     if len(matches) != 1:
