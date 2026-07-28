@@ -81,7 +81,17 @@ python3 "$SKILL_DIR/scripts/content_split.py" --input-dir INPUT_DIR \
   --analysis-dir PREVIEW_DIR --execute --output-dir OUTPUT_DIR
 ```
 
-参数：min_height=0.15（峰值最低分）、min_distance=1.5s（相邻峰合并窗口）、min_segment=2.0s（最段长）、过滤距开头<3s 的切点（intro 转场非主题变化）。置信度：high≥0.4 / medium≥0.25 / low<0.25。含 low 置信切点的视频标记 needs_review。
+**自适应策略**（已内置，无需手动调参）：
+- Pass 1：min_height=0.25、min_distance=2.5s 找高置信切点
+- Pass 2：对 >15s 的长段，降阈值到 0.10 重扫全部原始峰，逐个测试找最佳平衡切点；同时启动 dHash 滑动窗口备援（弥补 ffmpeg scene detection 对同场景过渡的盲区）
+- build_segments 返回 `(segs, merged)`，merged=True 时拒绝该切点（避免生成碎片后被合并消掉）
+- Pass 3：过拆分检查——中位段 <7s 时合并最差切点
+
+**诊断经验**：4 类问题模式
+1. **过度拆分**：中位段 <7s → Pass 3 自动合并
+2. **密集峰合并**：多个高峰挤在 5s 窗口内 → Pass 2 逐个原始峰测试，不依赖聚类
+3. **转场不可检测**：同场景同光线，ffmpeg scene score <0.15 → dHash 备援
+4. **阈值过高漏切**：长段 >20s 但峰分 <0.25 → Pass 2 降阈值到 0.10 全覆盖
 
 **节拍法（备选）** — `split_multitheme_video.py`，适合段长均匀（约 10s / 15s 等距）的拼接视频：
 

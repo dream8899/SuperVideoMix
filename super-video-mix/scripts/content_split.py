@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import argparse, csv, json, re, subprocess, sys
 from pathlib import Path
-from statistics import median
 
-DEFAULT_MIN_HEIGHT = 0.15
-DEFAULT_MIN_DISTANCE = 1.5
-DEFAULT_MIN_SEGMENT = 2.0
+DEFAULT_MIN_HEIGHT = 0.25     # 太低会产生噪声峰值
+DEFAULT_MIN_DISTANCE = 3.0    # 合拢同一过渡特效的相邻峰
+DEFAULT_MIN_SEGMENT = 4.0     # 硬下限，不允许 <4s 碎片
 DEFAULT_MIN_CUT_FROM_START = 3.0
 
 
@@ -65,91 +64,233 @@ def detect_black_tail(path: Path, video_duration: float) -> tuple[float, dict | 
     return s, {"start": s, "end": e, "duration": d}
 
 
-# ── peak detection ──────────────────────────────────────────────
+# ── peak clustering ─────────────────────────────────────────────
 
-def find_peaks(scores: list[tuple[float, float]], min_height: float = DEFAULT_MIN_HEIGHT,
-               min_distance: float = DEFAULT_MIN_DISTANCE) -> list[tuple[float, float, str]]:
-    """Find scene change peaks from all frame scores. Returns [(time, score, confidence)]."""
-    if not scores:
-        return []
-
+def cluster_peaks(scores: list[tuple[float, float]], min_height: float,
+                  min_distance: float) -> list[float]:
+    """Cluster peaks by time distance, return best time per cluster."""
     candidates = [(t, s) for t, s in scores if s >= min_height and t > 0.1]
     if not candidates:
         return []
-
-    # cluster nearby peaks
     clusters = [[candidates[0]]]
     for c in candidates[1:]:
         if c[0] - clusters[-1][-1][0] <= min_distance:
             clusters[-1].append(c)
         else:
             clusters.append([c])
-    peaks = []
-    for cl in clusters:
-        t, s = max(cl, key=lambda x: x[1])
-        conf = "high" if s >= 0.4 else "medium" if s >= 0.25 else "low"
-        peaks.append((t, s, conf))
-    return peaks
+    return [max(cl, key=lambda x: x[1])[0] for cl in clusters]
 
 
-# ── analysis ────────────────────────────────────────────────────
+def find_peaks(scores: list[tuple[float, float]], min_height: float = DEFAULT_MIN_HEIGHT,
+               min_distance: float = DEFAULT_MIN_DISTANCE) -> list[tuple[float, float, str]]:
+    """Backward-compatible peak API returning time, score and confidence."""
+    candidates = [(t, s) for t, s in scores if s >= min_height and t > 0.1]
+    if not candidates:
+        return []
+    clusters = [[candidates[0]]]
+    for candidate in candidates[1:]:
+        if candidate[0] - clusters[-1][-1][0] <= min_distance:
+            clusters[-1].append(candidate)
+        else:
+            clusters.append([candidate])
+    result = []
+    for cluster in clusters:
+        time, score = max(cluster, key=lambda item: item[1])
+        confidence = "high" if score >= 0.4 else "medium" if score >= 0.25 else "low"
+        result.append((time, score, confidence))
+    return result
 
-def analyze_content(path: Path, min_height: float = DEFAULT_MIN_HEIGHT,
-                    min_distance: float = DEFAULT_MIN_DISTANCE,
+
+# ── segment building ────────────────────────────────────────────
+
+def build_segments(cut_times: list[float], total_dur: float,
+                   min_segment: float = DEFAULT_MIN_SEGMENT) -> tuple[list[dict], bool]:
+    """Build segments from cuts, merging those < min_segment.
+    Returns (segments, merged) — merged=True if any short segment was merged away."""
+    if not cut_times:
+        return [{"index": 1, "start": 0.0, "end": total_dur, "duration": total_dur}], False
+
+    points = [0.0] + sorted(cut_times) + [total_dur]
+    segs = [{"start": points[i], "end": points[i+1], "duration": points[i+1] - points[i]}
+            for i in range(len(points) - 1)]
+
+    had_merge = False
+    changed = True
+    while changed:
+        changed = False
+        if len(segs) <= 1:
+            break
+        min_idx = min(range(len(segs)), key=lambda i: segs[i]["duration"])
+        if segs[min_idx]["duration"] >= min_segment:
+            break
+        left_dur = segs[min_idx - 1]["duration"] if min_idx > 0 else float("inf")
+        right_dur = segs[min_idx + 1]["duration"] if min_idx < len(segs) - 1 else float("inf")
+        if left_dur <= right_dur and min_idx > 0:
+            segs[min_idx - 1]["end"] = segs[min_idx]["end"]
+            segs[min_idx - 1]["duration"] = segs[min_idx - 1]["end"] - segs[min_idx - 1]["start"]
+        elif min_idx < len(segs) - 1:
+            segs[min_idx + 1]["start"] = segs[min_idx]["start"]
+            segs[min_idx + 1]["duration"] = segs[min_idx + 1]["end"] - segs[min_idx + 1]["start"]
+        segs.pop(min_idx)
+        had_merge = True
+        changed = True
+
+    result = []
+    for i, s in enumerate(segs):
+        result.append({"index": i + 1, "start": round(s["start"], 6),
+                       "end": round(s["end"], 6), "duration": round(s["duration"], 6)})
+    return result, had_merge
+
+
+# ── dHash fallback ──────────────────────────────────────────────
+
+def dhash_detect(path: Path, seg_start: float, seg_end: float) -> float | None:
+    """Sliding-window dHash comparison to find transitions invisible to ffmpeg scene detect."""
+    fps, side = 6, 64
+    dur = seg_end - seg_start
+    r = subprocess.run([
+        "ffmpeg", "-v", "error", "-ss", f"{seg_start:.3f}", "-t", f"{dur:.3f}",
+        "-i", str(path), "-an", "-vf", f"fps={fps},scale={side}:{side}:flags=area,format=gray",
+        "-f", "rawvideo", "-"
+    ], capture_output=True, timeout=30)
+
+    size = side * side
+    frames = [r.stdout[i:i+size] for i in range(0, len(r.stdout) - size + 1, size)]
+    if len(frames) < 10:
+        return None
+
+    def dh(f):
+        h = 0
+        for y in range(side):
+            for x in range(side - 1):
+                if f[y * side + x] > f[y * side + x + 1]:
+                    h |= 1 << (y * (side - 1) + x)
+        return h
+
+    def ham(a, b):
+        return bin(a ^ b).count("1")
+
+    hashes = [dh(f) for f in frames]
+    lag = int(2 * fps)
+    diffs = [(seg_start + i / fps, ham(hashes[i], hashes[i - lag]))
+             for i in range(lag, len(hashes))]
+    if not diffs:
+        return None
+
+    vals = [d for _, d in diffs]
+    mean_d = sum(vals) / len(vals)
+    std_d = (sum((v - mean_d)**2 for v in vals) / len(vals)) ** 0.5
+    candidates = [(t, d) for t, d in diffs if (d - mean_d) > 2.0 * std_d]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda x: x[1])
+    if seg_start + 3.0 < best[0] < seg_end - 3.0:
+        return best[0]
+    return None
+
+
+# ── adaptive analysis ───────────────────────────────────────────
+
+LONG_SEGMENT = 15.0
+MIN_HEIGHT_DEFAULT = 0.25
+MIN_HEIGHT_LOW = 0.10
+
+
+def analyze_content(path: Path, min_height: float = MIN_HEIGHT_DEFAULT,
+                    min_distance: float = 2.5,
                     min_segment: float = DEFAULT_MIN_SEGMENT,
                     min_cut_from_start: float = DEFAULT_MIN_CUT_FROM_START) -> dict:
+    """Adaptive content-aware analysis with iterative long-segment refinement."""
+    scores = scene_scores(path)
     media = probe(path)
     usable_dur, black_tail = detect_black_tail(path, media["video_duration"])
-    scores = scene_scores(path)
-    raw_peaks = find_peaks(scores, min_height=min_height, min_distance=min_distance)
 
-    # filter: exclude near start and in black tail
-    effective_end = usable_dur
-    peaks = [(t, s, c) for t, s, c in raw_peaks
-             if t >= min_cut_from_start and t <= effective_end - min_segment]
+    # Pass 1: detect with default threshold
+    peaks_025 = [(t, s) for t, s in scores if s >= min_height and t >= min_cut_from_start]
+    cuts = cluster_peaks(peaks_025, min_height, min_distance)
+    cuts = [c for c in cuts if usable_dur - c >= min_segment]
+    segs, _ = build_segments(cuts, usable_dur, min_segment)
 
-    # merge segments that would be too short
-    if peaks:
-        filtered = [peaks[0]]
-        for p in peaks[1:]:
-            if p[0] - filtered[-1][0] < min_segment:
-                if p[1] > filtered[-1][1]:
-                    filtered[-1] = p
-            else:
-                filtered.append(p)
-        peaks = filtered
+    # Pass 2: for any long segment, try ALL raw peaks + dHash
+    for _ in range(5):
+        long_segs = [(i, s) for i, s in enumerate(segs) if s["duration"] > LONG_SEGMENT]
+        if not long_segs:
+            break
+        changed = False
+        for _, seg in long_segs:
+            raw = [(t, s) for t, s in scores
+                   if seg["start"] + 2.0 < t < seg["end"] - 2.0 and s >= MIN_HEIGHT_LOW]
+            if raw:
+                best_min_dur = 0
+                best_cut = None
+                for t, _ in sorted(raw, key=lambda x: -x[1])[:20]:
+                    if any(abs(t - c) < 2.0 for c in cuts):
+                        continue
+                    trial_segs, merged = build_segments(sorted(set(cuts + [t])), usable_dur, min_segment)
+                    if merged:
+                        continue
+                    region = [s for s in trial_segs
+                             if seg["start"] <= s["start"] < seg["end"]]
+                    if region and all(s["duration"] >= min_segment for s in region):
+                        min_d = min(s["duration"] for s in region)
+                        if min_d > best_min_dur:
+                            best_min_dur = min_d
+                            best_cut = t
+                if best_cut:
+                    cuts = sorted(set(cuts + [best_cut]))
+                    changed = True
+            # dHash fallback
+            dh = dhash_detect(path, seg["start"], seg["end"])
+            if dh and all(abs(dh - c) >= 2.0 for c in cuts):
+                trial_segs, merged = build_segments(sorted(set(cuts + [dh])), usable_dur, min_segment)
+                if not merged:
+                    region = [s for s in trial_segs
+                             if seg["start"] <= s["start"] < seg["end"]]
+                    if region and all(s["duration"] >= min_segment for s in region):
+                        cuts = sorted(set(cuts + [dh]))
+                        changed = True
+        if not changed:
+            break
+        cuts = [c for c in cuts if usable_dur - c >= min_segment]
+        segs, _ = build_segments(cuts, usable_dur, min_segment)
 
-    points = [0.0] + [p[0] for p in peaks] + [effective_end]
-    segments = []
-    for i in range(len(points) - 1):
-        segments.append({"index": i + 1, "start": round(points[i], 6),
-                         "end": round(points[i + 1], 6),
-                         "duration": round(points[i + 1] - points[i], 6)})
+    # Pass 3: over-split check — merge if average mid-segment < 7s
+    if len(segs) > 1:
+        mid = [s for s in segs if s["duration"] >= 5.0]
+        if mid:
+            avg = sum(s["duration"] for s in mid) / len(mid)
+            if avg < 7.0:
+                best_improve = 0
+                best_remove = None
+                for i in range(len(cuts)):
+                    test_cuts = [c for j, c in enumerate(cuts) if j != i]
+                    test_segs, _ = build_segments(test_cuts, usable_dur, min_segment)
+                    if len(test_segs) >= 2:
+                        test_mid = [s for s in test_segs if s["duration"] >= 5.0]
+                        new_avg = sum(s["duration"] for s in test_mid) / len(test_mid) if test_mid else 0
+                        if new_avg - avg > best_improve:
+                            best_improve = new_avg - avg
+                            best_remove = i
+                if best_remove is not None and best_improve > 1.5:
+                    cuts = [c for j, c in enumerate(cuts) if j != best_remove]
+                    segs, _ = build_segments(cuts, usable_dur, min_segment)
 
-    # cadence candidates for comparison
-    cadence_results = []
-    for cadence in (10.0, 15.0):
-        count = max(2, round(usable_dur / cadence))
-        step = usable_dur / count
-        expected = [step * idx for idx in range(1, count)]
-        strengths = []
-        for target in expected:
-            nearby = [s for t, s in scores if abs(t - target) <= 2.5]
-            strengths.append(max(nearby, default=0.0))
-        cadence_results.append({"cadence": cadence, "count": count, "step": step,
-                                "expected": expected, "strengths": strengths,
-                                "score": round(median(strengths) + sum(strengths) / max(1, len(strengths)), 6)})
+    # Build peak metadata
+    all_peaks = []
+    for c in cuts:
+        nearby = [s for t, s in scores if abs(t - c) < 0.5]
+        best_score = max(nearby) if nearby else 0
+        conf = "high" if best_score >= 0.4 else "medium" if best_score >= 0.25 else "low"
+        all_peaks.append({"time": round(c, 6), "score": round(best_score, 4),
+                          "confidence": conf})
 
-    low_conf = [p for p in peaks if p[2] == "low"]
-    needs_review = len(low_conf) > 0 or len(peaks) == 0
-
+    low_confidence = any(item["confidence"] == "low" for item in all_peaks)
     return {"input": str(path), "media": media, "usable_duration": usable_dur,
-            "ignored_black_tail": black_tail, "method": "content_peak_detection",
-            "cadence_candidates": cadence_results,
-            "detected_peaks": [{"time": round(p[0], 6), "score": round(p[1], 4), "confidence": p[2]} for p in peaks],
+            "ignored_black_tail": black_tail, "method": "adaptive_content_peak",
+            "detected_peaks": all_peaks, "segments": segs,
             "parameters": {"min_height": min_height, "min_distance": min_distance,
                            "min_segment": min_segment, "min_cut_from_start": min_cut_from_start},
-            "segments": segments, "status": "needs_review" if needs_review else "ready"}
+            "status": "needs_review" if len(segs) <= 1 or low_confidence else "ready"}
 
 
 # ── preview ─────────────────────────────────────────────────────
@@ -366,8 +507,8 @@ def main():
     p.add_argument("--analyze", action="store_true")
     p.add_argument("--preview", action="store_true", help="Generate preview frames at cut points")
     p.add_argument("--execute", action="store_true")
-    p.add_argument("--min-height", type=float, default=DEFAULT_MIN_HEIGHT)
-    p.add_argument("--min-distance", type=float, default=DEFAULT_MIN_DISTANCE)
+    p.add_argument("--min-height", type=float, default=MIN_HEIGHT_DEFAULT)
+    p.add_argument("--min-distance", type=float, default=2.5)
     p.add_argument("--min-segment", type=float, default=DEFAULT_MIN_SEGMENT)
     p.add_argument("--min-cut-from-start", type=float, default=DEFAULT_MIN_CUT_FROM_START)
 
