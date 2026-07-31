@@ -73,6 +73,21 @@
       }
     },
     "tool_versions": {"type": "object"},
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "source_key", "operation", "agent"],
+      "properties": {
+        "schema": {"const": "supermedia.lineage/v1"},
+        "source_key": {"type": "string", "pattern": "^[a-z0-9-]+:.+$"},
+        "source_creator": {"type": ["string", "null"]},
+        "parent_asset_id": {"type": ["string", "null"]},
+        "batch_id": {"type": ["string", "null"]},
+        "recipe_id": {"type": ["string", "null"]},
+        "operation": {"type": "string"},
+        "agent": {"type": "string"}
+      }
+    },
     "plan_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
   },
   "$defs": {

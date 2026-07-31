@@ -24,6 +24,9 @@ description: 面向抖音、TikTok、Instagram Reels、YouTube Shorts 等授权�
 11. 必须先生成并审阅 `视觉核验映射.tsv`：每个输出段落都要有 `状态=exact` 或人工确认的 `reviewed_category`；仍为 `category_only`、空值或仅序号的条目一律进入 HOLD，不得生成“可发布”文案或最终命名。执行前后强制校验文件名、映射表、文案表三方一一对应；发现不一致立即停止，不得交付半成品。
 12. 最终发布文案使用可读 `.txt`：每个视频单独一份，子目录与批次根目录各有汇总；中文与 English 分区表达，保留原始英文文案。机器 JSON/TSV 仅作为审批或内部证据，不得替代人类交付物。
 13. 下载后的输入必须先做 QuickTime 兼容性预检：VP9/VP09、非 H.264、非 AAC 或非 MP4 容器先运行 `normalize`，生成新 H.264 + AAC MP4；转换通过 `ffprobe` 和完整解码验证后，才进入 `dedupe`、`analyze` 或翻新。
+14. 与 `superdown88`、`super-upload` 联动时，计划必须携带平台原生
+    `source_key`、父资产、批次与配方；verified execution 必须导入统一
+    SuperMedia SQLite 账本。文件名不能替代血缘。
 
 ## 选择工作流
 
@@ -50,8 +53,11 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" dedupe INPUT_DIR --report duplica
 python3 "$SKILL_DIR/scripts/video_pipeline.py" fingerprint INPUT_DIR --threshold 0.86 --report perceptual-dedupe.json
 python3 "$SKILL_DIR/scripts/video_pipeline.py" metadata INPUT.mp4 --output OUTPUT__catalog-clean.mp4 --report metadata.json
 python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT --analysis analysis.json \
-  --accept-suggested-tail --final-output OUTPUT.mp4 --output plan.json
-python3 "$SKILL_DIR/scripts/video_pipeline.py" apply plan.json --report execution.json
+  --accept-suggested-tail --source-key instagram:SHORTCODE \
+  --batch-id BATCH --recipe-id RECIPE \
+  --final-output OUTPUT.mp4 --output plan.json
+python3 "$SKILL_DIR/scripts/video_pipeline.py" apply plan.json --report execution.json \
+  --catalog-root "/absolute/Video_Download"
 python3 "$SKILL_DIR/scripts/video_pipeline.py" verify plan.json --report verification.json
 ```
 
@@ -241,6 +247,9 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
 - 需要选择 `delogo`、`removelogo` 或 VSR 后端时，读取 [references/removal-backends.md](references/removal-backends.md)。
 - 需要定位文字标签、Logo 或生成最小损失裁剪候选时，读取 [references/label-logo-detection.md](references/label-logo-detection.md)。
 - 需要实现或校验计划结构时，读取 [references/plan.schema.json](references/plan.schema.json)。
+- 需要跨下载、处理和发布维护统一作品身份、派生血缘或发布历史时，读取
+  `superdown88/references/media-lineage-contract.md`；若当前 Agent 没有安装
+  `superdown88`，停止账本联动并要求安装，不得另建不兼容数据库。
 
 ## 交付与清理
 

@@ -381,7 +381,7 @@ def execute_plan(plan: dict[str, Any]) -> dict[str, Any]:
     temporary_output.unlink()
     output_media["path"] = str(output)
     completed_at = datetime.now(timezone.utc)
-    return {
+    result = {
         "schema_version": plan["schema_version"],
         "kind": "video-execution",
         "status": "verified",
@@ -394,3 +394,6 @@ def execute_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "output": output_media,
         "checks": checks,
     }
+    if plan.get("lineage"):
+        result["lineage"] = plan["lineage"]
+    return result

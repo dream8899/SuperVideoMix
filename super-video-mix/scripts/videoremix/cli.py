@@ -1,5 +1,7 @@
 import argparse
 import json
+import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -156,6 +158,12 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--approve-conflicts", action="store_true", help="确认已审查并接受调色/滤镜重叠风险")
     plan.add_argument("--approve-high-risk", action="store_true")
     plan.add_argument("--final-output", help="成品绝对或相对路径；默认 INPUT.remix.mp4")
+    plan.add_argument("--source-key", help="统一资产账本 source_key，例如 instagram:DaBCJx9CdIU")
+    plan.add_argument("--source-creator", help="规范来源博主，仅用于展示和审计")
+    plan.add_argument("--parent-asset-id", help="输入文件在统一账本中的 asset_id")
+    plan.add_argument("--batch-id", help="本次 Remix/拆分批次 ID")
+    plan.add_argument("--recipe-id", help="稳定处理配方 ID")
+    plan.add_argument("--agent", default="super-video-mix", help="执行 Agent 标识")
     plan.add_argument("--output", required=True, help="plan JSON 输出路径")
     _add_json_flag(plan)
     plan.set_defaults(handler=command_plan, flip="off")
@@ -163,6 +171,8 @@ def build_parser() -> argparse.ArgumentParser:
     apply = subparsers.add_parser("apply", help="安全执行当前已支持的计划操作")
     apply.add_argument("plan")
     apply.add_argument("--report", help="execution JSON；默认与 plan 同目录")
+    apply.add_argument("--catalog-root", help="Video_Download 根目录；提供后自动导入 verified 回执")
+    apply.add_argument("--catalog-cli", help="media_asset_catalog.py 路径；默认自动查找 superdown88")
     _add_json_flag(apply)
     apply.set_defaults(handler=command_apply)
 
@@ -396,6 +406,18 @@ def command_plan(args: argparse.Namespace) -> int:
         "approve_preview": args.approve_preview,
         "approve_conflicts": args.approve_conflicts,
         "approve_high_risk": args.approve_high_risk,
+        "lineage": {
+            "schema": "supermedia.lineage/v1",
+            "source_key": args.source_key,
+            "source_creator": args.source_creator,
+            "parent_asset_id": args.parent_asset_id,
+            "batch_id": args.batch_id,
+            "recipe_id": args.recipe_id,
+            "operation": "video-transform",
+            "agent": args.agent,
+        }
+        if args.source_key
+        else None,
     }
     plan = build_plan(media, final_output, options, analysis)
     plan_path = write_json(args.output, plan)
@@ -426,14 +448,65 @@ def command_apply(args: argparse.Namespace) -> int:
         else Path(args.plan).expanduser().resolve().with_suffix(".execution.json")
     )
     write_json(report_path, execution)
+    catalog_result = None
+    if args.catalog_root:
+        lineage = execution.get("lineage")
+        if not lineage or not lineage.get("source_key"):
+            raise InputError(
+                "--catalog-root 要求 plan 由 --source-key 创建",
+                code="CATALOG_LINEAGE_REQUIRED",
+            )
+        catalog_cli = _resolve_catalog_cli(args.catalog_cli)
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(catalog_cli),
+                "--root",
+                str(Path(args.catalog_root).expanduser().resolve()),
+                "ingest-receipt",
+                str(report_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if process.returncode:
+            raise InputError(
+                f"成品已验证，但统一账本导入失败：{process.stderr.strip() or process.stdout.strip()}",
+                code="CATALOG_INGEST_FAILED",
+            )
+        catalog_result = json.loads(process.stdout)
     result = {
         "status": "verified",
         "report": str(report_path),
         "output": execution["output"]["path"],
         "plan_hash": execution["plan_hash"],
+        "catalog": catalog_result,
     }
     _emit(result, json_mode=args.json, summary=f"执行并验证完成：{execution['output']['path']}")
     return EXIT_OK
+
+
+def _resolve_catalog_cli(explicit: str | None) -> Path:
+    candidates = []
+    if explicit:
+        candidates.append(Path(explicit))
+    if os.environ.get("SUPER_MEDIA_CATALOG_CLI"):
+        candidates.append(Path(os.environ["SUPER_MEDIA_CATALOG_CLI"]))
+    candidates.extend(
+        [
+            Path.home() / ".codex/skills/superdown88/scripts/media_asset_catalog.py",
+            Path.home() / ".agents/skills/superdown88/scripts/media_asset_catalog.py",
+        ]
+    )
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        if resolved.is_file():
+            return resolved
+    raise InputError(
+        "未找到 media_asset_catalog.py；请传 --catalog-cli 或设置 SUPER_MEDIA_CATALOG_CLI",
+        code="CATALOG_CLI_MISSING",
+    )
 
 
 def _resolution_matches(expected: str, media: dict[str, Any], input_media: dict[str, Any]) -> bool:

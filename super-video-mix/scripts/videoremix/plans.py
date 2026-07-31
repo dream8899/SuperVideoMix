@@ -505,6 +505,8 @@ def build_plan(
             "ffprobe": tool_version("ffprobe"),
         },
     }
+    if options.get("lineage"):
+        plan["lineage"] = copy.deepcopy(options["lineage"])
     plan["plan_hash"] = compute_plan_hash(plan)
     return plan
 

@@ -89,6 +89,21 @@ class VideoRemixPlanTests(unittest.TestCase):
         self.assertFalse(plan["preview"]["required"])
         verify_plan_hash(plan)
 
+    def test_plan_preserves_versioned_lineage_in_plan_hash(self):
+        lineage = {
+            "schema": "supermedia.lineage/v1",
+            "source_key": "instagram:ABC123",
+            "source_creator": "maker",
+            "parent_asset_id": "asset_source",
+            "batch_id": "batch-1",
+            "recipe_id": "preserve-v1",
+            "operation": "video-transform",
+            "agent": "test-agent",
+        }
+        plan = self.make_plan(lineage=lineage)
+        self.assertEqual(plan["lineage"], lineage)
+        verify_plan_hash(plan)
+
     def test_enhancements_are_independent_and_conflicts_are_reported(self):
         plan = self.make_plan(
             composition="fit",
