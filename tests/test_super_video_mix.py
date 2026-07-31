@@ -22,7 +22,8 @@ from videoremix.plans import (  # noqa: E402
     validate_plan_for_apply,
     verify_plan_hash,
 )
-from content_split import find_peaks  # noqa: E402
+from content_split import find_false_split_candidates, find_peaks, split_one  # noqa: E402
+from repair_false_splits import rebuild_segments  # noqa: E402
 from smart_label_detect import analyze as analyze_labels  # noqa: E402
 from smart_label_detect import calculate_crop, detect_spatial_candidates, match_target_label  # noqa: E402
 from free_crop_remix import crop_rect  # noqa: E402
@@ -108,6 +109,45 @@ class VideoRemixPlanTests(unittest.TestCase):
     def test_content_split_clusters_nearby_peaks_without_duplicate_tail(self):
         peaks = find_peaks([(1.0, 0.3), (1.4, 0.5), (5.0, 0.45)], min_distance=1.5)
         self.assertEqual([(round(t, 1), round(score, 1)) for t, score, _ in peaks], [(1.4, 0.5), (5.0, 0.5)])
+
+    def test_short_local_segment_is_routed_to_false_split_review(self):
+        segments = [
+            {"start": 0.0, "end": 8.1, "duration": 8.1},
+            {"start": 8.1, "end": 18.1, "duration": 10.0},
+            {"start": 18.1, "end": 22.2, "duration": 4.1},
+            {"start": 22.2, "end": 26.1, "duration": 3.9},
+        ]
+        candidates = find_false_split_candidates(segments)
+        self.assertEqual([item["boundary_index"] for item in candidates], [2, 3])
+        self.assertEqual(candidates[-1]["time"], 22.2)
+
+    def test_review_required_analysis_cannot_execute_without_approval(self):
+        analysis = {
+            "status": "needs_review",
+            "segments": [
+                {"start": 0.0, "end": 5.0, "duration": 5.0},
+                {"start": 5.0, "end": 10.0, "duration": 5.0},
+            ],
+            "media": {"has_audio": False},
+            "usable_duration": 10.0,
+            "parameters": {},
+        }
+        result = split_one(self.source, analysis, self.root / "out")
+        self.assertEqual(result["status"], "skipped")
+        self.assertIn("review_required", result["reason"])
+
+    def test_repair_plan_merges_multiple_adjacent_false_boundaries(self):
+        segments = [
+            {"start": 0.0, "end": 10.1, "duration": 10.1},
+            {"start": 10.1, "end": 13.1, "duration": 3.0},
+            {"start": 13.1, "end": 15.9, "duration": 2.8},
+            {"start": 15.9, "end": 17.9, "duration": 2.0},
+            {"start": 17.9, "end": 20.1, "duration": 2.2},
+            {"start": 20.1, "end": 30.1, "duration": 10.0},
+        ]
+        rebuilt = rebuild_segments(segments, [2, 3, 4])
+        self.assertEqual([(item["start"], item["end"]) for item in rebuilt],
+                         [(0.0, 10.1), (10.1, 20.1), (20.1, 30.1)])
 
     def test_spatial_overlay_detection_prefers_minimum_loss_edge_crop(self):
         width, height = 64, 96

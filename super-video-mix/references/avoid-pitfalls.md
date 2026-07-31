@@ -80,6 +80,7 @@ discover → exact dedupe → analyze → plan → preview/review → apply → 
 | `PREVIEW_NOT_APPROVED` | 视觉变化未审批 | 展示预览，取得确认后重建/执行计划。 |
 | `HIGH_RISK_NOT_APPROVED` | 高风险操作未显式批准 | 保持计划状态，不能绕过门禁。 |
 | 文案与画面不符 | 从系列标签或 OCR 片段反推内容 | 回到代表帧核验，重建映射、文件名和文案。 |
+| 同一变形过程被拆成多段 | scene/dHash 把展开动作、快速手势或遮挡当成新主题 | 对 ≤5.25 秒局部段取切点前后四帧；同一主体、标签和动作目标则移除切点，从原片重建并完整解码验证。 |
 | 批次 JSON/TSV 杂乱 | 将机器报告当交付物 | 将最终人类交付统一为 `.txt`；保留必要证据文件。 |
 | Windows 找不到 FFmpeg | `ffmpeg/bin` 未在 PATH | 新开终端后运行 `ffmpeg -version`，仍失败则使用绝对路径或修正 PATH。 |
 | 输出放到源目录外面 | Agent 默认在父目录创建输出 | **必须**在源目录下建子文件夹作为输出；用户期望翻新产物跟源文件在一起。 |

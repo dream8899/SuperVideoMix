@@ -81,6 +81,12 @@ python3 "$SKILL_DIR/scripts/content_split.py" --input-dir INPUT_DIR \
   --analysis-dir PREVIEW_DIR --execute --output-dir OUTPUT_DIR
 ```
 
+短于 5.25 秒的局部段会进入 `false_split_candidates`，必须比较切点前后
+`-0.80/-0.15/+0.15/+0.80s` 四帧：同一主体、同一文字标签、同一展开动作
+应合并；新主体或新标签才保留。`needs_review` 默认禁止执行，逐项确认后才可加
+`--approve-review`。已产生的误拆可用 `repair_false_splits.py` 按审核计划从原片
+重建；禁止直接拼接压缩片段，且必须保留备份并做完整解码验证。
+
 **自适应策略**（已内置，无需手动调参）：
 - Pass 1：min_height=0.25、min_distance=2.5s 找高置信切点
 - Pass 2：对 >15s 的长段，降阈值到 0.10 重扫全部原始峰，逐个测试找最佳平衡切点；同时启动 dHash 滑动窗口备援（弥补 ffmpeg scene detection 对同场景过渡的盲区）

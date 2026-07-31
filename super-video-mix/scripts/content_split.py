@@ -18,6 +18,7 @@ DEFAULT_MIN_HEIGHT = 0.25     # 太低会产生噪声峰值
 DEFAULT_MIN_DISTANCE = 3.0    # 合拢同一过渡特效的相邻峰
 DEFAULT_MIN_SEGMENT = 4.0     # 硬下限，不允许 <4s 碎片
 DEFAULT_MIN_CUT_FROM_START = 3.0
+DEFAULT_REVIEW_SHORT_SEGMENT = 5.25  # 短于此值的局部段必须复核主体/标签连续性
 
 
 # ── ffmpeg helpers ──────────────────────────────────────────────
@@ -140,6 +141,32 @@ def build_segments(cut_times: list[float], total_dur: float,
         result.append({"index": i + 1, "start": round(s["start"], 6),
                        "end": round(s["end"], 6), "duration": round(s["duration"], 6)})
     return result, had_merge
+
+
+def find_false_split_candidates(
+    segments: list[dict],
+    review_short_segment: float = DEFAULT_REVIEW_SHORT_SEGMENT,
+) -> list[dict]:
+    """找出容易由展开动作、快速运动或特效峰造成的可疑局部切点。
+
+    这里只路由人工复核，不自动合并。像素跳变无法可靠区分“新主题”和
+    “同一物体进入下一变形阶段”，自动删除切点会制造反向错误。
+    """
+    candidates = []
+    for boundary_index in range(1, len(segments)):
+        left = segments[boundary_index - 1]
+        right = segments[boundary_index]
+        shortest = min(float(left["duration"]), float(right["duration"]))
+        if shortest <= review_short_segment:
+            candidates.append({
+                "boundary_index": boundary_index,
+                "time": round(float(left["end"]), 6),
+                "left_duration": round(float(left["duration"]), 6),
+                "right_duration": round(float(right["duration"]), 6),
+                "reason": "short_fragment_requires_semantic_continuity_review",
+                "review_frames": [-0.8, -0.15, 0.15, 0.8],
+            })
+    return candidates
 
 
 # ── dHash fallback ──────────────────────────────────────────────
@@ -285,12 +312,22 @@ def analyze_content(path: Path, min_height: float = MIN_HEIGHT_DEFAULT,
                           "confidence": conf})
 
     low_confidence = any(item["confidence"] == "low" for item in all_peaks)
+    false_split_candidates = find_false_split_candidates(segs)
+    review_reasons = []
+    if low_confidence:
+        review_reasons.append("low_confidence_peak")
+    if false_split_candidates:
+        review_reasons.append("possible_action_peak_false_split")
     return {"input": str(path), "media": media, "usable_duration": usable_dur,
             "ignored_black_tail": black_tail, "method": "adaptive_content_peak",
             "detected_peaks": all_peaks, "segments": segs,
+            "false_split_candidates": false_split_candidates,
+            "review": {"status": "required" if review_reasons else "not_required",
+                       "reasons": review_reasons,
+                       "rule": "同一主体、固定标签和连续展开动作不应拆开；新主体/新标签才保留切点"},
             "parameters": {"min_height": min_height, "min_distance": min_distance,
                            "min_segment": min_segment, "min_cut_from_start": min_cut_from_start},
-            "status": "needs_review" if len(segs) <= 1 or low_confidence else "ready"}
+            "status": "needs_review" if len(segs) <= 1 or review_reasons else "ready"}
 
 
 # ── preview ─────────────────────────────────────────────────────
@@ -323,12 +360,19 @@ def make_preview(path: Path, analysis: dict, preview_dir: Path):
 
 # ── split execution ─────────────────────────────────────────────
 
-def split_one(path: Path, analysis: dict, output_root: Path) -> dict:
+def split_one(path: Path, analysis: dict, output_root: Path, approve_review: bool = False) -> dict:
     segments = analysis["segments"]
     media = analysis["media"]
     parameters = analysis.get("parameters", {})
     min_cut_from_start = float(parameters.get("min_cut_from_start", DEFAULT_MIN_CUT_FROM_START))
     min_segment = float(parameters.get("min_segment", DEFAULT_MIN_SEGMENT))
+
+    if analysis.get("status") == "needs_review" and not approve_review:
+        return {
+            "file": path.name,
+            "status": "skipped",
+            "reason": "review_required_use_--approve-review_after_visual_check",
+        }
 
     # filter: keep only cuts >= min_cut_from_start
     valid_starts = set()
@@ -484,7 +528,7 @@ def cmd_execute(args):
             if len(analysis["segments"]) <= 1:
                 skipped += 1
                 continue
-            result = split_one(f, analysis, out_dir)
+            result = split_one(f, analysis, out_dir, approve_review=args.approve_review)
             if result["status"] == "ok":
                 ok += 1
             elif result["status"] == "skipped":
@@ -507,6 +551,8 @@ def main():
     p.add_argument("--analyze", action="store_true")
     p.add_argument("--preview", action="store_true", help="Generate preview frames at cut points")
     p.add_argument("--execute", action="store_true")
+    p.add_argument("--approve-review", action="store_true",
+                   help="确认已逐一核验 false_split_candidates 后执行 needs_review 项")
     p.add_argument("--min-height", type=float, default=MIN_HEIGHT_DEFAULT)
     p.add_argument("--min-distance", type=float, default=2.5)
     p.add_argument("--min-segment", type=float, default=DEFAULT_MIN_SEGMENT)
