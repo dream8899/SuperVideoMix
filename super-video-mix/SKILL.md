@@ -27,6 +27,8 @@ description: 面向抖音、TikTok、Instagram Reels、YouTube Shorts 等授权�
 14. 与 `superdown88`、`super-upload` 联动时，计划必须携带平台原生
     `source_key`、父资产、批次与配方；verified execution 必须导入统一
     SuperMedia SQLite 账本。文件名不能替代血缘。
+15. 自我改进只能追加隔离的学习候选，不得在媒体任务中改写本 Skill、脚本、模板、
+    schema、默认阈值或安全门禁。创作者记忆属于外部运行数据，不得自动泛化为全局规则。
 
 ## 选择工作流
 
@@ -250,6 +252,10 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
 - 需要跨下载、处理和发布维护统一作品身份、派生血缘或发布历史时，读取
   `superdown88/references/media-lineage-contract.md`；若当前 Agent 没有安装
   `superdown88`，停止账本联动并要求安装，不得另建不兼容数据库。
+- 需要记录经验、提出规则变化或维护 Skill 时，先读取
+  [references/controlled-evolution.md](references/controlled-evolution.md)。核心变更必须另开
+  维护任务、预先提交人工批准记录，并运行 `scripts/controlled_evolution_guard.py`；不得
+  由任务复盘、次数累计或创作者记忆自动晋升。
 
 ## 交付与清理
 
