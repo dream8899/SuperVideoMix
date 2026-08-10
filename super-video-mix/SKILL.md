@@ -1,6 +1,6 @@
 ---
 name: super-video-mix
-description: 面向抖音、TikTok、Instagram Reels、YouTube Shorts 等授权短视频，执行素材去重、多主题长视频精准拆分、废片尾分析与清理、固定水印或硬字幕区域处理、3:4 裁切、轻度放大、高清增强、重新构图、镜像反转、调色、降噪、锐化、音画同步变速、发布文案核验和输出验证。Use when Codex needs to analyze, split, deduplicate, crop, enhance, transform, name, prepare copy, or verify authorized short-form videos with reviewable plans and without overwriting source files.
+description: 面向抖音、TikTok、Instagram Reels、YouTube Shorts 等授权短视频，执行素材去重、多主题长视频精准拆分、废片尾分析与清理、固定水印或硬字幕区域处理、3:4 裁切、轻度放大、高清增强、重新构图、镜像反转、调色、降噪、锐化、音画同步变速、文件 MD5 轮换、发布文案核验和输出验证。Use when Codex needs to analyze, split, deduplicate, crop, enhance, transform, name, prepare copy, or verify authorized short-form videos with reviewable plans and without overwriting source files.
 ---
 
 # SuperVideoMix 短视频清理、翻新与发布准备
@@ -37,6 +37,7 @@ description: 面向抖音、TikTok、Instagram Reels、YouTube Shorts 等授权�
 - 要找重复素材：运行 `dedupe`；默认只报告，不删除文件。
 - 要找转码、裁切或轻微编辑后的相似素材：运行 `fingerprint`；输出跨时间采样的候选组与置信度，仅供本地人工复核。
 - 要规范化非内容元数据：先 `normalize`，再运行 `metadata` 输出新 MP4；完成后重新运行 `fingerprint`。
+- 要让成品文件的 MD5/SHA-256 变化（画面与声音不变）：对已交付 MP4 运行 `md5-rotate`，或在 `plan` 中加入 `--md5-rotate`。
 - 要拆分多主题长视频：先运行 `split_multitheme_video.py` 生成分析 JSON 和中点联系表；观看预览、核对边界及逐段命名后，才带审批参数执行。
 - 要清理或翻新：先 `analyze`，再用用户意图生成 `plan`，展示关键操作、风险、预览要求与输出路径。
 - 要执行：核对计划、源文件哈希、preview approval、conflict approval 和所有 high-risk approval；只执行当前明确支持的类型化操作。
@@ -54,6 +55,8 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" normalize INPUT.mp4 \
 python3 "$SKILL_DIR/scripts/video_pipeline.py" dedupe INPUT_DIR --report duplicates.json
 python3 "$SKILL_DIR/scripts/video_pipeline.py" fingerprint INPUT_DIR --threshold 0.86 --report perceptual-dedupe.json
 python3 "$SKILL_DIR/scripts/video_pipeline.py" metadata INPUT.mp4 --output OUTPUT__catalog-clean.mp4 --report metadata.json
+python3 "$SKILL_DIR/scripts/video_pipeline.py" md5-rotate OUTPUT.mp4 \
+  --output OUTPUT__md5-rotate.mp4 --report md5-rotate.json
 python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT --analysis analysis.json \
   --accept-suggested-tail --source-key instagram:SHORTCODE \
   --batch-id BATCH --recipe-id RECIPE \
@@ -140,6 +143,14 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
   --denoise light --sharpen light --speed 1.06 \
   --approve-preview --approve-conflicts \
   --final-output OUTPUT.mp4 \
+  --output plan.json
+```
+
+需要成品文件身份变化时，在 `plan` 加 `--md5-rotate`（容器元数据 remux，`-c copy`，画面/声音与编码不变；`apply` 后自动校验完整解码、编解码一致性与 MD5/SHA-256 变化）：
+
+```bash
+python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
+  --final-output OUTPUT.mp4 --md5-rotate \
   --output plan.json
 ```
 
@@ -237,6 +248,7 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
 - 所有 `risk=high` 操作是否 `approved=true`。
 - `output.path` 是否与输入不同且不存在覆盖风险。
 - `plan_hash` 是否有效。
+- 启用 `--md5-rotate` 时，执行报告的 `md5_rotate` 字段已记录 tag 与变化前后的 MD5/SHA-256。
 
 ## 资源路由
 
@@ -269,6 +281,6 @@ python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
 
 ## 阶段边界
 
-当前版本已实现：下载后 VP9/VP09 → H.264 + AAC MP4 兼容化、媒体探测、精确哈希与基础感知指纹去重、相似候选组和置信度报告、非内容元数据规范化、多证据废片尾分析、10/15 秒节奏候选比较、多主题真实转场定位、黑尾排除、分段联系表、逐段命名与完整解码验证、文字标签/Logo 二维候选定位与最小损失裁剪建议、3:4 批量预判与红线预览、筛选清单与排期、显式裁切审批、固定区域 `delogo`、3:4 锚点裁切、1.0–1.25 倍安全放大、Lanczos 高清缩放、HD/HD+ 编码、水印后端路由元数据、`fit/fill/stretch` 构图、水平/垂直镜像、预设调色与滤镜、降噪、锐化、音画同步变速、临时输出验证和无覆盖交付。
+当前版本已实现：下载后 VP9/VP09 → H.264 + AAC MP4 兼容化、媒体探测、精确哈希与基础感知指纹去重、相似候选组和置信度报告、非内容元数据规范化、文件 MD5 轮换、多证据废片尾分析、10/15 秒节奏候选比较、多主题真实转场定位、黑尾排除、分段联系表、逐段命名与完整解码验证、文字标签/Logo 二维候选定位与最小损失裁剪建议、3:4 批量预判与红线预览、筛选清单与排期、显式裁切审批、固定区域 `delogo`、3:4 锚点裁切、1.0–1.25 倍安全放大、Lanczos 高清缩放、HD/HD+ 编码、水印后端路由元数据、`fit/fill/stretch` 构图、水平/垂直镜像、预设调色与滤镜、降噪、锐化、音画同步变速、临时输出验证和无覆盖交付。
 
-不要声称已经实现：`smart/manual` 内容感知构图、移动水印跟踪、通用视频 inpainting、Gemini remover 实际执行、内置 VSR 模型、OCR 字幕重建或批处理续跑。感知指纹仅用于本地分类/人工复核，不修改或伪造指纹，也不用于规避平台规则。`auto` 只能形成建议，必须展开为确定参数后才能执行；custom filter graph 暂不开放执行。
+不要声称已经实现：`smart/manual` 内容感知构图、移动水印跟踪、通用视频 inpainting、Gemini remover 实际执行、内置 VSR 模型、OCR 字幕重建或批处理续跑。`auto` 只能形成建议，必须展开为确定参数后才能执行；custom filter graph 暂不开放执行。

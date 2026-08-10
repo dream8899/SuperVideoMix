@@ -272,6 +272,17 @@ class VideoRemixPlanTests(unittest.TestCase):
         self.assertEqual(trim["params"]["end"], 7.5)
         self.assertEqual(plan["expected"]["duration"], 7.5)
 
+    def test_md5_rotate_option_adds_typed_low_risk_operation(self):
+        plan = self.make_plan(md5_rotate=True)
+        operation = next(item for item in plan["operations"] if item["type"] == "md5_rotate")
+        self.assertEqual(operation["mode"], "metadata")
+        self.assertEqual(operation["params"]["method"], "container_metadata_tag")
+        self.assertEqual(operation["risk"], "low")
+        self.assertFalse(operation["requires_preview"])
+        self.assertTrue(operation["approved"])
+        self.assertTrue(plan["expected"]["md5_rotated"])
+        verify_plan_hash(plan)
+
 
 class TailAnalysisLogicTests(unittest.TestCase):
     def test_finds_contiguous_dark_silent_tail(self):
@@ -427,6 +438,52 @@ class VideoRemixCliTests(unittest.TestCase):
         details = json.loads(fingerprint_report.read_text(encoding="utf-8"))
         self.assertTrue(details["similar_candidates"])
         self.assertIn(details["similar_candidates"][0]["classification"], {"likely", "possible"})
+
+    def test_md5_rotate_subcommand_and_plan_option_change_file_identity_only(self):
+        rotated = self.root / "sample-md5-rotated.mp4"
+        report = self.root / "md5-rotate.json"
+        result = self.run_cli("md5-rotate", self.source, "--output", rotated, "--report", report, "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["status"], "md5_rotated")
+        self.assertTrue(payload["verified"])
+        details = json.loads(report.read_text(encoding="utf-8"))
+        self.assertNotEqual(details["input"]["md5"], details["output"]["md5"])
+        self.assertNotEqual(details["input"]["sha256"], details["output"]["sha256"])
+        self.assertEqual(details["output"]["video_codec"], "h264")
+        self.assertEqual(details["output"]["audio_codec"], "aac")
+        rotated_media = probe_media(rotated)
+        self.assertEqual(rotated_media["width"], 320)
+        self.assertEqual(rotated_media["height"], 240)
+
+        plan = self.root / "md5-plan.json"
+        output = self.root / "md5-output.mp4"
+        result = self.run_cli(
+            "plan", self.source, "--md5-rotate", "--final-output", output, "--output", plan, "--json"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved_plan = json.loads(plan.read_text(encoding="utf-8"))
+        md5_op = next(item for item in saved_plan["operations"] if item["type"] == "md5_rotate")
+        self.assertEqual(md5_op["mode"], "metadata")
+
+        execution = self.root / "md5-execution.json"
+        result = self.run_cli("apply", plan, "--report", execution, "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        execution_data = json.loads(execution.read_text(encoding="utf-8"))
+        self.assertIn("md5_rotate", execution_data["operations_executed"])
+        self.assertIn("md5_rotated", [check["name"] for check in execution_data["checks"]])
+        self.assertNotEqual(
+            execution_data["md5_rotate"]["input_md5"],
+            execution_data["md5_rotate"]["output_md5"],
+        )
+
+        verification = self.root / "md5-verification.json"
+        result = self.run_cli("verify", plan, "--report", verification, "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verify_data = json.loads(verification.read_text(encoding="utf-8"))
+        self.assertTrue(verify_data["verified"])
+        md5_check = next(check for check in verify_data["checks"] if check["name"] == "md5_rotated")
+        self.assertEqual(md5_check["status"], "pass")
 
     def test_detect_accept_apply_and_verify_black_silent_tail(self):
         source = self.root / "tail-sample.mp4"

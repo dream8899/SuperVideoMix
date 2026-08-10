@@ -46,6 +46,15 @@ def sha256_file(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
+def md5_file(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
+    source = resolve_input_file(path)
+    digest = hashlib.md5()
+    with source.open("rb") as stream:
+        while chunk := stream.read(chunk_size):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _duration(format_data: dict[str, Any], streams: list[dict[str, Any]]) -> float | None:
     candidates = [format_data.get("duration")]
     candidates.extend(stream.get("duration") for stream in streams)

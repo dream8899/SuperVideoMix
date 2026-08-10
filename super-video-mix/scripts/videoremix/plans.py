@@ -394,6 +394,22 @@ def build_operations(options: dict[str, Any]) -> tuple[list[dict[str, Any]], lis
             },
         ]
     )
+    if options.get("md5_rotate"):
+        operations.append(
+            {
+                "type": "md5_rotate",
+                "mode": "metadata",
+                "preset": None,
+                "preset_version": None,
+                "params": {
+                    "method": "container_metadata_tag",
+                    "tag_prefix": "svmix-md5-rotate-v1",
+                },
+                "risk": "low",
+                "requires_preview": False,
+                "approved": True,
+            }
+        )
 
     conflicts = []
     color_enabled = next(item for item in operations if item["type"] == "color")["mode"] != "off"
@@ -497,6 +513,7 @@ def build_plan(
             "resolution": options["resolution"],
             "fps": options["fps"],
             "has_audio": bool(media.get("has_audio")),
+            "md5_rotated": bool(options.get("md5_rotate")),
         },
         "output": {"path": str(destination), "overwrite": False},
         "tool_versions": {

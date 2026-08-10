@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import NotImplementedPhaseError, PlanError, ToolError
+from .md5rotate import rotate_md5
 from .media import probe_media, require_tool
 from .plans import validate_plan_for_apply
 
@@ -371,14 +372,41 @@ def execute_plan(plan: dict[str, Any]) -> dict[str, Any]:
             f"FFmpeg 渲染失败：{message}；临时路径 {temporary_output}",
             code="FFMPEG_RENDER_FAILED",
         )
-    output_media, checks = _verify_temporary_output(plan, temporary_output)
+    md5_rotate_info = None
+    md5_operation = _operation(plan, "md5_rotate")
+    if md5_operation and md5_operation.get("mode") != "off":
+        file_descriptor, rotated_name = tempfile.mkstemp(
+            dir=output.parent,
+            prefix=f".{output.stem}.",
+            suffix=".rotated.mp4",
+        )
+        os.close(file_descriptor)
+        rotated_temporary = Path(rotated_name)
+        rotated_temporary.unlink()
+        md5_rotate_info = rotate_md5(temporary_output, rotated_temporary)
+        output_media, checks = _verify_temporary_output(plan, rotated_temporary)
+        checks.append(
+            {
+                "name": "md5_rotated",
+                "status": "pass",
+                "input_md5": md5_rotate_info["input"]["md5"],
+                "output_md5": md5_rotate_info["output"]["md5"],
+                "tag": md5_rotate_info["tag"],
+            }
+        )
+        output_media["path"] = str(output)
+        temporary_output.unlink()
+        delivery_source = rotated_temporary
+    else:
+        output_media, checks = _verify_temporary_output(plan, temporary_output)
+        delivery_source = temporary_output
     try:
-        os.link(temporary_output, output)
+        os.link(delivery_source, output)
     except FileExistsError as exc:
         raise PlanError(f"输出在交付前已出现，拒绝覆盖：{output}", code="OUTPUT_EXISTS") from exc
     except OSError as exc:
         raise ToolError(f"无法交付验证后的输出：{exc}", code="OUTPUT_DELIVERY_FAILED") from exc
-    temporary_output.unlink()
+    delivery_source.unlink()
     output_media["path"] = str(output)
     completed_at = datetime.now(timezone.utc)
     result = {
@@ -394,6 +422,15 @@ def execute_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "output": output_media,
         "checks": checks,
     }
+    if md5_rotate_info:
+        result["md5_rotate"] = {
+            "method": md5_rotate_info["method"],
+            "tag": md5_rotate_info["tag"],
+            "input_md5": md5_rotate_info["input"]["md5"],
+            "output_md5": md5_rotate_info["output"]["md5"],
+            "input_sha256": md5_rotate_info["input"]["sha256"],
+            "output_sha256": md5_rotate_info["output"]["sha256"],
+        }
     if plan.get("lineage"):
         result["lineage"] = plan["lineage"]
     return result

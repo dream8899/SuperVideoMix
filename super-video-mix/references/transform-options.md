@@ -8,6 +8,7 @@
 4. 执行顺序
 5. 冲突与预览
 6. 音画同步变速
+7. 文件 MD5 轮换
 
 ## 1. 选择模型
 
@@ -104,3 +105,25 @@
 ## 7. 音画同步变速
 
 视频速度 factor 为 `s` 时使用等价于 `setpts=PTS/s` 的表达式。音频使用 factor 为 `s` 的 `atempo` 链；超出单个 filter 范围时拆成多个合法 factor。验证输出音视频时长差不超过一个输出帧周期或计划定义的容差。
+
+## 8. 文件 MD5 轮换
+
+`--md5-rotate`（plan 选项）或 `md5-rotate` 子命令对成品 MP4 做一次容器元数据 remux：
+
+- 流级 `-c copy`，画面、声音、分辨率、时长、编码和感知指纹均不变。
+- 写入唯一非内容元数据 tag（`comment=svmix-md5-rotate-v1:<nonce>`），文件字节变化后 MD5 与 SHA-256 随之改变。
+- 输出必须为新路径且输入已完成编码兼容化；完成后完整解码、编解码一致性，并校验输出 MD5 ≠ 输入 MD5。
+- 只适用于自有或已获授权内容；得到的是新字节的派生哈希值，不是把哈希改成指定值。
+
+```bash
+python3 "$SKILL_DIR/scripts/video_pipeline.py" md5-rotate OUTPUT.mp4 \
+  --output OUTPUT__md5-rotate.mp4 --report md5-rotate.json
+```
+
+或在 plan 中一并交付：
+
+```bash
+python3 "$SKILL_DIR/scripts/video_pipeline.py" plan INPUT \
+  --final-output OUTPUT.mp4 --md5-rotate \
+  --output plan.json
+```

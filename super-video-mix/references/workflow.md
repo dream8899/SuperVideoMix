@@ -14,7 +14,7 @@
 
 ```text
 discover → probe → dedupe → analyze → multi-theme split preflight → crop preflight → screening/schedule → plan → review gate
-  → clean → transform → encode → verify → deliver
+  → clean → transform → encode → verify → md5-rotate（可选） → deliver
 ```
 
 `analyze` 和 `plan` 不渲染视频。`apply` 只能执行已保存且通过校验的计划。执行阶段不得临时改变参数；先写同目录临时文件，完整解码和规格验证通过后再无覆盖交付。
@@ -77,6 +77,7 @@ JOB_DIR/
 8. 3:4 顶部裁切项已在筛选清单中获批，且预览红线未穿过关键主体。
 9. 多主题拆分项已观看联系表，切点没有落在动作中段，片尾黑屏已排除，逐段名称与内容一致。
 10. 文字/Logo 裁剪项已查看红框/绿框预览；候选身份、最小损失方向和 `review_required` 已人工确认，未确认结果不得写入创作者记忆。
+11. 启用 `md5-rotate` 时确认输出为新路径、画面与声音不变，执行报告记录变化前后的 MD5/SHA-256 与 tag。
 
 ## 5. 退出码
 

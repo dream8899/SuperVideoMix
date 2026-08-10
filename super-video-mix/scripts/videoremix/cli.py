@@ -14,8 +14,9 @@ from .errors import InputError, VideoRemixError
 from .executor import execute_plan
 from .fingerprint import build_candidate_report
 from .io_utils import read_json, write_json
+from .md5rotate import rotate_md5
 from .metadata import sanitize_metadata
-from .media import probe_media, sha256_file, tool_version
+from .media import md5_file, probe_media, sha256_file, tool_version
 from .normalize import normalize_download
 from .plans import (
     COLOR_CHOICES,
@@ -69,6 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
     _add_json_flag(metadata)
     metadata.set_defaults(handler=command_metadata)
 
+    md5_rotate = subparsers.add_parser(
+        "md5-rotate",
+        help="对成品 MP4 做容器元数据 remux，轮换文件 MD5/SHA-256，画面与声音不变",
+    )
+    md5_rotate.add_argument("input")
+    md5_rotate.add_argument("--output", required=True, help="新的 .mp4 输出路径，不得覆盖输入")
+    md5_rotate.add_argument("--tag", help="可选自定义元数据 tag；默认自动生成唯一 tag")
+    md5_rotate.add_argument("--report", required=True)
+    _add_json_flag(md5_rotate)
+    md5_rotate.set_defaults(handler=command_md5_rotate)
+
     fingerprint = subparsers.add_parser("fingerprint", help="计算视频感知指纹并生成相似候选组")
     fingerprint.add_argument("inputs", nargs="+")
     fingerprint.add_argument("--threshold", type=float, default=0.86, help="候选相似度阈值，默认 0.86")
@@ -109,6 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="top-left",
     )
     plan.add_argument("--quality", choices=("standard", "hd", "hd-plus"), default="standard")
+    plan.add_argument(
+        "--md5-rotate",
+        action="store_true",
+        help="成品交付前对输出做容器元数据 remux，轮换文件 MD5（画面/声音不变）",
+    )
     mirror_group = plan.add_mutually_exclusive_group()
     mirror_group.add_argument(
         "--mirror",
@@ -253,6 +270,21 @@ def command_metadata(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def command_md5_rotate(args: argparse.Namespace) -> int:
+    report = rotate_md5(args.input, args.output, tag=args.tag)
+    report_path = write_json(args.report, report)
+    result = {
+        "status": report["status"],
+        "report": str(report_path),
+        "output": report["output"]["path"],
+        "input_md5": report["input"]["md5"],
+        "output_md5": report["output"]["md5"],
+        "verified": report["verified"],
+    }
+    _emit(result, json_mode=args.json, summary=f"MD5 轮换完成：{report['output']['path']}")
+    return EXIT_OK
+
+
 def command_fingerprint(args: argparse.Namespace) -> int:
     if not 0.0 < args.threshold <= 1.0:
         raise InputError("threshold 必须在 0 到 1 之间", code="FINGERPRINT_THRESHOLD_INVALID")
@@ -387,6 +419,7 @@ def command_plan(args: argparse.Namespace) -> int:
         "safe_zoom": args.safe_zoom,
         "zoom_anchor": args.zoom_anchor,
         "quality": args.quality,
+        "md5_rotate": args.md5_rotate,
         "flip": args.flip,
         "denoise": args.denoise,
         "denoise_params": args.denoise_params,
@@ -562,6 +595,17 @@ def command_verify(args: argparse.Namespace) -> int:
                     "tolerance": tolerance,
                 }
             )
+    if (plan.get("expected") or {}).get("md5_rotated") and output.exists():
+        input_md5 = md5_file(Path((plan.get("input") or {}).get("path", "")).expanduser().resolve())
+        output_md5 = md5_file(output)
+        checks.append(
+            {
+                "name": "md5_rotated",
+                "status": "pass" if input_md5 != output_md5 else "fail",
+                "input_md5": input_md5,
+                "output_md5": output_md5,
+            }
+        )
 
     verified = bool(checks) and all(item["status"] == "pass" for item in checks)
     report = {
