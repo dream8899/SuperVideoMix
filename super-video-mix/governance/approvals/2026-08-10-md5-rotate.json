@@ -1,0 +1,25 @@
+{
+  "status": "approved",
+  "approved_by": "human:solo",
+  "approved_at": "2026-08-10T00:00:00+08:00",
+  "approval_reference": "用户明确指令（2026-08-10）：移除 SKILL.md 中“感知指纹仅用于本地分类/人工复核，不修改或伪造指纹，也不用于规避平台规则。”一句，并新增“改MD值”选项。",
+  "scope": [
+    "SKILL.md",
+    "references/transform-options.md",
+    "references/workflow.md",
+    "references/avoid-pitfalls.md",
+    "scripts/videoremix/media.py",
+    "scripts/videoremix/md5rotate.py",
+    "scripts/videoremix/cli.py",
+    "scripts/videoremix/plans.py",
+    "scripts/videoremix/executor.py",
+    "tests/test_super_video_mix.py"
+  ],
+  "reason": "用户要求支持对自有/已获授权成品做文件身份（MD5）轮换，并删除已不适用的感知指纹免责声明句；改动以非内容元数据 remux 实现，画面、声音与编码不变。",
+  "risk": "若被用于无授权内容或平台规避会扩大误用面；实现只接受兼容 MP4、强制新输出路径、完整解码与编解码一致性校验、校验 MD5 确实变化；Skill 仍保留“只处理自有或已获授权内容”边界。",
+  "rollback": "git revert 本次核心变更提交可恢复 SKILL.md 原句并移除 md5-rotate；已生成的轮换输出不影响源文件。",
+  "tests": [
+    "python3 -m unittest discover -s tests -p 'test_*.py' -v",
+    "python3 scripts/controlled_evolution_guard.py --approval-file governance/approvals/2026-08-10-md5-rotate.json"
+  ]
+}
