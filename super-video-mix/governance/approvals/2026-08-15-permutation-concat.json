@@ -1,0 +1,17 @@
+{
+  "status": "approved",
+  "approved_by": "human:solo",
+  "approved_at": "2026-08-15T00:00:00+08:00",
+  "approval_reference": "用户明确指令（2026-08-15）：Claude 端已有更新，要求把 permutation_concat.py 与 SKILL.md 排列组合拼接条目同步推送到 GitHub；规则固化：N 段素材 → 2 段/N 段拼接 → 每个序号在第一位最多出现一次 → 01 永久排除第一位。",
+  "scope": [
+    "SKILL.md",
+    "scripts/permutation_concat.py"
+  ],
+  "reason": "用户要求将已在本地/Claude 端更新的首位去重排列组合拼接功能同步入库并推送；本地已存在脚本与 SKILL.md 条目，当前仅缺提交与推送。",
+  "risk": "脚本直接调用 ffmpeg concat 且使用 -y 覆盖输出，与 Skill 先计划后审批的默认门禁不一致；用户已确认推送，风险由用户承担；不影响源文件，输出为新建目录。",
+  "rollback": "git revert 对应提交即可移除 SKILL.md 条目与脚本；已生成的拼接输出保留在输出目录，不影响源分段。",
+  "tests": [
+    "python3 -m unittest discover -s tests -p 'test_*.py' -v",
+    "python3 scripts/controlled_evolution_guard.py --approval-file governance/approvals/2026-08-15-permutation-concat.json"
+  ]
+}
