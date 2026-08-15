@@ -23,6 +23,7 @@ from videoremix.plans import (  # noqa: E402
     verify_plan_hash,
 )
 from content_split import find_false_split_candidates, find_peaks, split_one  # noqa: E402
+from permutation_concat import run as permutation_run  # noqa: E402
 from repair_false_splits import rebuild_segments  # noqa: E402
 from smart_label_detect import analyze as analyze_labels  # noqa: E402
 from smart_label_detect import calculate_crop, detect_spatial_candidates, match_target_label  # noqa: E402
@@ -300,6 +301,51 @@ class TailAnalysisLogicTests(unittest.TestCase):
         metrics.extend(FrameMetric(index / 4, 2, 1, 1, 0, -60) for index in range(18, 20))
         cut_at, _ = find_tail_cut(metrics, 5.0, profile)
         self.assertIsNone(cut_at)
+
+
+class PermutationConcatTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.input_dir = self.root / "segs"
+        self.input_dir.mkdir()
+        for stem in ("01_alpha", "02_beta", "03_gamma"):
+            (self.input_dir / f"{stem}.mp4").write_bytes(b"fixture")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_first_position_dedup_and_01_exclusion_with_lossless_concat(self):
+        output_dir = self.root / "out"
+        calls = []
+
+        def fake_run(command, **kwargs):
+            first_line = None
+            if "-f" in command:
+                list_path = Path(command[command.index("-i") + 1])
+                first_line = list_path.read_text(encoding="utf-8").splitlines()[0]
+            calls.append((command, first_line))
+            return subprocess.CompletedProcess(command, 0)
+
+        with mock.patch("permutation_concat.subprocess.run", side_effect=fake_run):
+            permutation_run(self.input_dir, output_dir)
+
+        concat_calls = [(command, first_line) for command, first_line in calls if first_line is not None]
+        self.assertEqual(len(concat_calls), 4)  # 2 段 x2 + 3 段 x2
+        first_positions = []
+        for command, first_line in concat_calls:
+            self.assertEqual(command[command.index("-f") + 1], "concat")
+            self.assertEqual(command[command.index("-c") + 1], "copy")
+            first_positions.append(Path(first_line.split("'", 2)[1]).name)
+        self.assertTrue(all(not name.startswith("01_") for name in first_positions))
+        self.assertEqual(
+            sorted(name[:2] for name in first_positions),
+            ["02", "02", "03", "03"],
+        )
+        outputs = sorted({Path(command[-1]).resolve() for command, _ in concat_calls})
+        self.assertEqual(len(outputs), 4)
+        self.assertTrue(all(item.suffix == ".mp4" for item in outputs))
+        self.assertTrue(all(output_dir.resolve() in item.parents for item in outputs))
 
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "requires FFmpeg")

@@ -38,6 +38,7 @@ description: 面向抖音、TikTok、Instagram Reels、YouTube Shorts 等授权�
 - 要找转码、裁切或轻微编辑后的相似素材：运行 `fingerprint`；输出跨时间采样的候选组与置信度，仅供本地人工复核。
 - 要规范化非内容元数据：先 `normalize`，再运行 `metadata` 输出新 MP4；完成后重新运行 `fingerprint`。
 - 要让成品文件的 MD5/SHA-256 变化（画面与声音不变）：对已交付 MP4 运行 `md5-rotate`，或在 `plan` 中加入 `--md5-rotate`。
+- 要对已拆分段做排列组合拼接：运行 `permutation_concat.py`，按首位去重规则生成 2 段/3 段组合并无损拼接。每个序号在第一位最多出现一次，01 默认永久排除。
 - 要拆分多主题长视频：先运行 `split_multitheme_video.py` 生成分析 JSON 和中点联系表；观看预览、核对边界及逐段命名后，才带审批参数执行。
 - 要清理或翻新：先 `analyze`，再用用户意图生成 `plan`，展示关键操作、风险、预览要求与输出路径。
 - 要执行：核对计划、源文件哈希、preview approval、conflict approval 和所有 high-risk approval；只执行当前明确支持的类型化操作。
